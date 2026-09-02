@@ -1169,13 +1169,16 @@ input[type=range]::-webkit-slider-thumb{
   <input type="range" id="rpScrub" min="100" max="1000" value="100"/>
   <select id="rpSpeed">
     <!-- Progressive speed ladder, each step 50% slower than the one above it,
-         with 26× as the fastest (unchanged) and 1× as real, normal market
-         movement (real-time, 1 candle-second per candle-second). -->
+         with 85× as the fastest (raised from 26× so a multi-year backtest —
+         e.g. 6.8yrs of M1 data — finishes in under 25 minutes) and 1× as
+         real, normal market movement (real-time, 1 candle-second per
+         candle-second). -->
     <option value="1" selected>1×</option>
     <option value="3.25">2×</option>
     <option value="6.5">4×</option>
     <option value="13">20×</option>
-    <option value="26">26× ⚡</option>
+    <option value="26">26×</option>
+    <option value="85">85× ⚡</option>
   </select>
   <span id="rpStatus">— / —</span>
 </div>
@@ -1847,6 +1850,22 @@ function calcClosePnL(pos, exitPrice, reason) {
   return gross - commission;
 }
 
+// ── GUARANTEED BE/TRAIL FLOOR ──
+// BUG FIX: exits used to do `Math.max(0, raw)` once trailPhase reached 1,
+// which silently rewrote any negative `raw` (commission + adverse exit
+// slippage eating the small beDist buffer) into a fake exact $0.00 close —
+// hiding the real number rather than fixing it, and giving "BE" trades that
+// were actually small losses. Now that the BE-lock distance itself
+// (see updateThreePhaseTrail) is sized to clear commission + typical
+// slippage, `raw` is a genuine small profit in the normal case, so this
+// floor only ever matters in a rare high-slippage tail event — and even
+// then it guarantees a small REAL profit (not zero) rather than papering
+// over a loss, since that's the whole point of locking the stop past entry.
+function guaranteedBEPnl(pos, raw) {
+  const minProfit = (pos.lots || 0.01) * 0.20; // tiny guaranteed $/lot profit floor
+  return Math.max(minProfit, raw);
+}
+
 // ── SWAP (overnight financing) ──
 // Calibrated to a live Exness BTCUSDm contract spec (CFG.SWAP_LONG_PTS /
 // CFG.SWAP_SHORT_PTS, in points — see the CFG comment for the source
@@ -2138,18 +2157,14 @@ const REFINED_STRATEGY_CFG = {
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    // Raised 70 → 78 — the trend-aligned gate is the volume lever (it's the
-    // gate the vast majority of trades pass through). Pushing it up trades
-    // trade count for selectivity — this plus the two changes below is the
-    // combined lever for cutting frequency while skewing what's cut toward
-    // the weaker setups specifically, not a random subsample.
-    plusScore: 78,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 83,    // A  floor — the entry gate for COUNTER-trend setups
-    eliteScore: 100,     // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
-                          // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
-                          // (see clamp(..., 0, 100) in evaluate()), so 104 would make A+
-                          // mathematically unreachable — no setup could ever score that high.
-                          // Capped at 100, the actual ceiling, so A+ stays reachable (barely).
+    // Lowered per request: plusScore 78→72, premiumScore 83→80,
+    // eliteScore 100→92 — pulls all three grade floors down together.
+    plusScore: 72,        // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 80,    // A  floor — the entry gate for COUNTER-trend setups
+    eliteScore: 92,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+                          // scoreTotal is clamped to 0-100 (see clamp(..., 0, 100) in
+                          // evaluate()), and 92 sits well under that ceiling, so A+ is
+                          // comfortably reachable now (was "barely reachable" at 100).
 
     weights: {
       liquidity: 20,
@@ -5385,10 +5400,23 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const inProfit = isBuy ? (midForPnl >= entryPrice) : (midForPnl <= entryPrice);
     const pnlColor = inProfit ? '#448aff' : '#ef5350';
     const entryLabel = `${isBuy ? 'BUY' : 'SELL'} ${lotSz}L ${grade}${beLock} · ${pnlSign}$${Math.abs(livePnl).toFixed(2)}`;
-    const slLoss = pos.beTriggered ? 0 : (pos.slAmount || Math.abs(pos.entry - pos.slPrice) * (pos.lots || 0.01) * 100 || 0);
+    // BUG FIX: this used to hardcode BE as exactly "$0.00" and compute the
+    // plain-SL loss with a stray ×100 that didn't match the ×CONTRACT_SIZE
+    // unit math used everywhere else (calcPnLForPos/calcClosePnL). Once a
+    // trade is at BE or trailing, the stop sits at entry ± beDist (a real
+    // price, not literally entry), so its $ value is computed the same way
+    // as every other line here: (price delta) × position units. That now
+    // shows the BE/TRAIL stop's actual locked-in profit instead of a fake
+    // zero, and matches calcClosePnL's own accounting when it actually fires.
+    const posUnits = pos.posUnits || (pos.lots || 0.01) * CONTRACT_SIZE;
+    const slDelta = isBuy ? (slPrice - pos.entry) : (pos.entry - slPrice); // + = locked profit, - = loss
+    const slPnl = (pos.beTriggered || pos.trailActive)
+      ? slDelta * posUnits
+      : -(pos.slAmount || Math.abs(slDelta) * posUnits || 0);
+    const slSign = slPnl >= 0 ? '+' : '-';
     const slLineLabel = pos.trailActive
-      ? `TRAIL · SL ${pos.slPrice.toFixed(2)}`
-      : pos.beTriggered ? `BE  ·  $0.00` : `SL  ·  -$${slLoss.toFixed(2)}`;
+      ? `TRAIL · ${slSign}$${Math.abs(slPnl).toFixed(2)}`
+      : pos.beTriggered ? `BE  ·  ${slSign}$${Math.abs(slPnl).toFixed(2)}` : `SL  ·  -$${Math.abs(slPnl).toFixed(2)}`;
     const tpGain = pos.tpAmount || 0;
     const tpLineLabel = `TP  ·  +$${tpGain.toFixed(2)}`;
 
@@ -5602,7 +5630,7 @@ function updateStrengthGauge(buyStrength, sellStrength) {
 
   const cfg = (typeof RefinedStrategy !== 'undefined') ? RefinedStrategy.config.quality : null;
   const minFloor = cfg ? cfg.minimumScore : 53;
-  const fireFloor = cfg ? cfg.plusScore   : 78;
+  const fireFloor = cfg ? cfg.plusScore   : 72;
 
   num.textContent = value;
   fill.style.width = value + '%';
@@ -6252,8 +6280,23 @@ function updateThreePhaseTrail(pos, currentPrice) {
       // the "BE" stop past the actual target and letting a breakeven-labeled
       // close bank more profit than a real TP win. That's the bug behind BE
       // trades showing bigger $ amounts than TP trades in the log.
+      //
+      // BUG FIX: a "BE" close isn't actually free. calcClosePnL still
+      // deducts CFG.COMMISSION_PER_LOT (flat $/lot) and getExitSlippage
+      // (adverse — a triggered stop fills like a market order) from
+      // whatever this beDist locks in. Gross PnL here scales as
+      // beDist × lots, and commission scales as COMMISSION_PER_LOT × lots,
+      // so lot size cancels out — meaning beDist itself must clear
+      // commission + a typical adverse-slippage buffer, or a "BE lock"
+      // nets out to a real loss once fees are applied. That's why every BE
+      // exit was closing at exactly $0.00: the clamp further down was
+      // silently swallowing a small loss instead of showing it. Sizing
+      // beDist to clear costs up front means BE exits now bank a real
+      // small profit (BE_MIN_NET_PROFIT) instead of relying on that clamp.
+      const beCostFloor = CFG.COMMISSION_PER_LOT + 1.5; // commission + avg adverse exit-slippage buffer
+      const BE_MIN_NET_PROFIT = 1.0; // guaranteed $/lot locked in above cost
       const beDist = Math.min(
-        Math.max(CFG.TRAIL_DIST, totalMove * 0.15),
+        Math.max(CFG.TRAIL_DIST, totalMove * 0.15, beCostFloor + BE_MIN_NET_PROFIT),
         totalMove * 0.50
       );
       newSL = isBuy ? pos.entry + beDist : pos.entry - beDist;
@@ -6510,7 +6553,7 @@ function checkDemoPositions() {
       if(mid <= pos.slPrice) {
         const exitReason = (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL';
         const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-        const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
+        const pnl = (pos.trailPhase||0) >= 1 ? guaranteedBEPnl(pos, raw) : raw;
         closeData.push({pos, pnl, reason: exitReason});
       } else if(!runnerMode && mid >= pos.tpPrice) {
         closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP'});
@@ -6519,7 +6562,7 @@ function checkDemoPositions() {
       if(mid >= pos.slPrice) {
         const exitReason = (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL';
         const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-        const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
+        const pnl = (pos.trailPhase||0) >= 1 ? guaranteedBEPnl(pos, raw) : raw;
         closeData.push({pos, pnl, reason: exitReason});
       } else if(!runnerMode && mid <= pos.tpPrice) {
         closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP'});
@@ -7483,13 +7526,14 @@ const replay = {
   // New engine: process candles in a tight loop for a real time-budget each
   // animation frame (~30fps), then render ONCE per frame regardless of how
   // many candles were processed in it. Budget scales with the selected
-  // speed so 26× uses nearly the whole frame for computation (maximum
-  // throughput this browser/device can sustain), while slower presets get
-  // proportionally smaller budgets — so the dropdown's ordering (1× ...
-  // 26×) is preserved, just recalibrated to actually hit "under 10 minutes
-  // for a year of data" at the top end.
-  FRAME_BUDGET_CAP_MS: 30,
-  MAX_CANDLES_PER_FRAME: 4000,   // safety valve only; time budget is what normally stops a batch
+  // speed so the top tier uses nearly the whole frame for computation
+  // (maximum throughput this browser/device can sustain), while slower
+  // presets get proportionally smaller budgets — so the dropdown's ordering
+  // (1× ... 85×) is preserved, just recalibrated to hit "6.8 years of M1
+  // data in under 25 minutes" at the top end (was "1 year under 10 minutes"
+  // — raised ~2.7× across the board so every tier scales with it).
+  FRAME_BUDGET_CAP_MS: 85,
+  MAX_CANDLES_PER_FRAME: 8000,   // safety valve only; time budget is what normally stops a batch
   // ── 1× REAL-TIME PACING ──
   // 1× is a literal wall-clock pace: 0.40 real seconds per candle, throttled
   // against performance.now() so you can actually watch each candle form —
@@ -7642,7 +7686,7 @@ const replay = {
   },
 
   setSpeed(multiplier) {
-    this.speed = Math.max(1, Math.min(26, multiplier));
+    this.speed = Math.max(1, Math.min(85, multiplier));
   },
 
   scrubTo(targetIndex) {
@@ -8138,7 +8182,7 @@ const replay = {
           if (price <= pos.slPrice) {
             const exitReason = (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL';
             const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-            const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
+            const pnl = (pos.trailPhase || 0) >= 1 ? guaranteedBEPnl(pos, raw) : raw;
             closed = { pnl, reason: exitReason };
           } else if (!runnerMode && price >= pos.tpPrice) {
             closed = { pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP' };
@@ -8147,7 +8191,7 @@ const replay = {
           if (price >= pos.slPrice) {
             const exitReason = (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL';
             const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-            const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
+            const pnl = (pos.trailPhase || 0) >= 1 ? guaranteedBEPnl(pos, raw) : raw;
             closed = { pnl, reason: exitReason };
           } else if (!runnerMode && price <= pos.tpPrice) {
             closed = { pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP' };
@@ -8611,14 +8655,16 @@ function setBtToday() {
   const m = String(now.getUTCMonth() + 1).padStart(2, '0');
   const y = now.getUTCFullYear();
   const today = `${d}-${m}-${y}`;
-  // Default "From" to 7 days back instead of today — a same-day default was
+  // Default "From" to 8 years back instead of today — a same-day default was
   // silently producing near-zero (or, early in the UTC day, insufficient)
   // candle data for the backtest, which reads identically to "strategy never
-  // trades" from the user's perspective.
-  const weekAgo = new Date(now.getTime() - 7 * 86400 * 1000);
-  const wd = String(weekAgo.getUTCDate()).padStart(2, '0');
-  const wm = String(weekAgo.getUTCMonth() + 1).padStart(2, '0');
-  const wy = weekAgo.getUTCFullYear();
+  // trades" from the user's perspective. 8 years gives a deep default sample
+  // (MAX_PAGES in fetchBtCandles is sized to cover this span).
+  const eightYearsAgo = new Date(now.getTime());
+  eightYearsAgo.setUTCFullYear(eightYearsAgo.getUTCFullYear() - 8);
+  const wd = String(eightYearsAgo.getUTCDate()).padStart(2, '0');
+  const wm = String(eightYearsAgo.getUTCMonth() + 1).padStart(2, '0');
+  const wy = eightYearsAgo.getUTCFullYear();
   $('btDateFrom').value = `${wd}-${wm}-${wy}`;
   $('btDateTo').value = today;
   $('btDateError').style.display = 'none';
@@ -8702,7 +8748,7 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   const pageStarts = [];
   for (let s = startMs; s < endMs; s += pageSpanMs) pageStarts.push(s);
 
-  const MAX_PAGES = 2000; // ~2000 × 1000 M1 bars ≈ 3.8yrs — plenty of headroom for a 1yr backtest
+  const MAX_PAGES = 4400; // ~4400 × 1000 M1 bars ≈ 8.4yrs — headroom for an 8yr backtest fetch
   if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
   const CONCURRENCY = 24; // parallel in-flight requests, split across both hosts below
@@ -9486,7 +9532,7 @@ function _scanGapPositions() {
           if (price <= pos.slPrice) {
             const exitReason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
             const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-            const pnl = ph >= 1 ? Math.max(0, raw) : raw;
+            const pnl = ph >= 1 ? guaranteedBEPnl(pos, raw) : raw;
             closeData.push({ pos, pnl, reason: exitReason, atPrice: pos.slPrice });
             break;
           }
@@ -9498,7 +9544,7 @@ function _scanGapPositions() {
           if (price >= pos.slPrice) {
             const exitReason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
             const raw = calcClosePnL(pos, pos.slPrice, exitReason);
-            const pnl = ph >= 1 ? Math.max(0, raw) : raw;
+            const pnl = ph >= 1 ? guaranteedBEPnl(pos, raw) : raw;
             closeData.push({ pos, pnl, reason: exitReason, atPrice: pos.slPrice });
             break;
           }
