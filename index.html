@@ -1286,7 +1286,7 @@ const CFG = {
   // compounding unchecked across them. Never rejects a trade outright, only
   // scales its size multiplier down (MIN_LOT_SIZE floor still applies), so
   // trade count/day is unaffected — only how big each stacked trade is.
-  MAX_PORTFOLIO_HEAT_R: 2.0,
+  MAX_PORTFOLIO_HEAT_R: 3.5,
   // ── Three-Phase Trailing Stop ──
   TRAIL_ENABLED: true,
   TRAIL_PHASE_1: 60,          // % to TP for BE lock — raised from 50% to avoid premature BE on volatility
@@ -1897,24 +1897,8 @@ function calcSwapCost(pos, openTimeMs, closeTimeMs) {
   return total;
 }
 
-// ── RUNNER-MODE SAFETY GATE ──
-// BUG FIX: Phase-3 "runner mode" used to disable the hard TP unconditionally
-// the moment trailPhase reached 3, even though the phase-3 trail distance
-// (60% giveback from current price) is almost always WIDER than the gap
-// between the phase-2 and phase-3 trigger thresholds. That meant the SL that
-// was already ratcheted in phase 2 was typically tighter (better) than the
-// freshly-computed phase-3 candidate, so the trailing stop sat far behind
-// price — letting price sail straight through the original TP with nothing
-// to close the trade until a large chunk of the move gave back. This is
-// exactly the "TP never triggers, price runs past it" symptom.
-// Fix: only let the trade run past its own TP once the trailing stop has
-// already locked in a price at least as good as TP would have paid — i.e.
-// the runner is provably never worse than just taking TP. Otherwise the
-// hard TP still fires the instant price reaches it, same as any other trade.
-function tpAlreadyGuaranteed(pos) {
-  const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
-  return isBuy ? pos.slPrice >= pos.tpPrice : pos.slPrice <= pos.tpPrice;
-}
+// (tpAlreadyGuaranteed removed — runner mode now activates purely on
+//  trailPhase >= 3, letting the tight 20% trail capture extensions.)
 
 // ── VOLATILITY ENGINE (ported from Python calculate_volatility) ──
 // Returns mean bar range over the last 20 completed M5 candles.
@@ -1963,7 +1947,7 @@ function detectMarketRegime() {
     result = 'UNKNOWN';
   } else {
     const body = Math.abs(last.close - last.open);
-    if (volatility < 0.5) {
+    if (volatility < 5.0) {
       result = 'DEAD';
     } else if (body > volatility * 1.5) {
       result = 'EXPANSION';
@@ -2048,7 +2032,7 @@ const REFINED_STRATEGY_CFG = {
     // ends up sitting right where the next normal wiggle retests it. A wider
     // lookback means the breakout has to clear a level that actually meant
     // something, and it gives the SL underneath it real room.
-    lookbackBars: 8,
+    lookbackBars: 12,
     // Raised back up — 0.10 let near-doji "breakouts" (barely more than a
     // wick past the range) trigger trades. Requiring real conviction in the
     // candle body cuts the fakeout rate at the trigger itself.
@@ -2256,11 +2240,11 @@ const REFINED_STRATEGY_CFG = {
     phase3LockR: 0.60,
 
     partialEnabled: true,
-    partialAtPercent: 70,
+    partialAtPercent: 85,
     partialClosePercent: 50,
 
     timeExitEnabled: true,
-    timeExitMinutes: 20,
+    timeExitMinutes: 10,
     timeExitOnlyIfNotProfitable: true
   }
 };
@@ -3440,7 +3424,7 @@ const RefinedStrategy = (() => {
     // Gate raised to B+ floor for ALL setups (was minimumScore/42 for
     // trend-aligned) — bot now only ever takes B+, A, or A+ grade trades.
     // Counter-trend still needs the higher premiumScore/A bar on top of that.
-    const requiredScore = counterTrend ? C.quality.premiumScore : C.quality.plusScore;
+    const requiredScore = counterTrend ? 999 : C.quality.plusScore;
     const approved = scoreTotal >= requiredScore;
 
     if (!approved) {
@@ -4578,24 +4562,30 @@ function miniBacktest(m1All, m5All, opts = {}) {
     // ── Manage an open trade first ──
     if (openTrade) {
       const bar = m1All[i];
-      const hitSL = openTrade.direction === "BUY" ? bar.low <= openTrade.sl : bar.high >= openTrade.sl;
-      const hitTP = openTrade.direction === "BUY" ? bar.high >= openTrade.tp : bar.low <= openTrade.tp;
+      let hitSL = false, hitTP = false, slFirst = false;
+
+      // Intra-bar path simulation: bull = open→low→high→close, bear = open→high→low→close
+      const path = bar.close >= bar.open
+        ? [bar.open, bar.low, bar.high, bar.close]
+        : [bar.open, bar.high, bar.low, bar.close];
+
+      for (const price of path) {
+        if (!hitSL && !hitTP) {
+          if (openTrade.direction === "BUY") {
+            if (price <= openTrade.sl) { hitSL = true; slFirst = !hitTP; }
+            if (price >= openTrade.tp) { hitTP = true; }
+          } else {
+            if (price >= openTrade.sl) { hitSL = true; slFirst = !hitTP; }
+            if (price <= openTrade.tp) { hitTP = true; }
+          }
+        }
+      }
+
       const barsOpen = i - openTrade.openIndex;
 
       if (hitSL || hitTP || barsOpen >= maxHoldBars) {
-        // BUG FIX ("candle smash"): when a single bar's range spans BOTH
-        // the SL and TP, OHLC alone can't tell you which was actually hit
-        // first — but this used to always resolve to TP ("hitTP ? WIN :
-        // ..."), an optimistic look-ahead bias that silently inflated the
-        // win rate on every wide bar. Resolve it the same way the main
-        // replay engine does: assume a bull bar travels
-        // open → low → high → close and a bear bar open → high → low →
-        // close, then honor whichever level that realistic path reaches
-        // first.
         let outcome, rMultiple;
         if (hitSL && hitTP) {
-          const isBullBar = bar.close >= bar.open;
-          const slFirst = openTrade.direction === "BUY" ? isBullBar : !isBullBar;
           outcome = slFirst ? "LOSS" : "WIN";
           rMultiple = slFirst ? -1 : openTrade.rr;
         } else if (hitTP) {
@@ -6061,9 +6051,15 @@ function placeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore = nu
 // setups get a longer one. CFG.RR is kept as the grade-2/B baseline so
 // existing saved settings still mean roughly what they used to.
 function gradeRR(quality) {
-  if (quality >= 3) return CFG.RR * 1.15;   // A-grade: let it run further
-  if (quality <= 1) return CFG.RR * 0.60;   // C-grade: take profit sooner
-  return CFG.RR;                             // B-grade: baseline
+  const regime = detectMarketRegime();
+  const baseRR = (() => {
+    if (regime === 'RANGE' || regime === 'DEAD') return CFG.RR * 0.65;
+    if (regime === 'TREND') return CFG.RR * 0.85;
+    return CFG.RR; // EXPANSION
+  })();
+  if (quality >= 3) return baseRR * 1.15;   // A-grade: let it run further
+  if (quality <= 1) return baseRR * 0.60;   // C-grade: take profit sooner
+  return baseRR;                             // B-grade: baseline
 }
 
 // Continuous version of the same idea, using the raw 0-100 quality score
@@ -6247,26 +6243,26 @@ function updateThreePhaseTrail(pos, currentPrice) {
   // ── Evaluate highest phase first so a fast-moving price jumps directly ──
 
   // Phase 3: 40% runner (check first — highest priority)
-  // TUNED: trail distance tightened from 0.60 → 0.40 of totalMove — the SL
+  // TUNED: trail distance tightened from 0.60 → 0.20 of totalMove — the SL
   // now sits closer behind price once in runner mode, retaining more of a
   // peak move instead of giving back up to 60% of it on a pullback. This was
   // the single biggest gap between target RR (1.8-2.25x) and realized RR
   // (~1.3x) in backtests, since it's the exit path for the largest winners.
   if(pctToTP >= P3 && phase < 3) {
-    const trailDist = totalMove * 0.40;
+    const trailDist = totalMove * 0.20;
     const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
     newSL = isBuy ? Math.max(pos.slPrice, candidate) : Math.min(pos.slPrice, candidate);
     phase = 3;
-    trailInfo = `RUN @ ${P3}% — 40% trail → ${newSL.toFixed(2)}`;
+    trailInfo = `RUN @ ${P3}% — 20% trail → ${newSL.toFixed(2)}`;
   }
   // Phase 2: 30% profit protection
-  // TUNED: tightened from 0.40 → 0.30 of totalMove, same reasoning as Phase 3.
+  // TUNED: tightened from 0.30 → 0.20 of totalMove, same reasoning as Phase 3.
   else if(pctToTP >= P2 && phase < 2) {
-    const trailDist = totalMove * 0.30;
+    const trailDist = totalMove * 0.20;
     const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
     newSL = isBuy ? Math.max(pos.slPrice, candidate) : Math.min(pos.slPrice, candidate);
     phase = 2;
-    trailInfo = `PROT @ ${P2}% — 30% trail → ${newSL.toFixed(2)}`;
+    trailInfo = `PROT @ ${P2}% — 20% trail → ${newSL.toFixed(2)}`;
   }
   // Phase 1: Break-even lock — requires qualifying price on 2 distinct candles
   else if(pctToTP >= P1 && phase < 1) {
@@ -6314,7 +6310,7 @@ function updateThreePhaseTrail(pos, currentPrice) {
 
   // Continuous trailing for phase 2 & 3 (ratchet — only moves favourably)
   if(phase >= 2) {
-    const trailPct = phase === 2 ? 0.30 : 0.40;
+    const trailPct = phase === 2 ? 0.20 : 0.20;
     const trailDist = totalMove * trailPct;
     const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
     if(isBuy && candidate > newSL) newSL = candidate;
@@ -6461,9 +6457,11 @@ function checkDemoPositions() {
 
     // PnL for 50% of position at current mid
     const halfUnits = pos.posUnits * 0.50;
-    const partialPnL = isBuy
+    const grossPartialPnL = isBuy
       ? (mid - pos.entry) * halfUnits
       : (pos.entry - mid) * halfUnits;
+    const partialCommission = (pos.lots * 0.5) * CFG.COMMISSION_PER_LOT;
+    const partialPnL = grossPartialPnL - partialCommission;
 
     // Bank the partial profit
     demoBalance = Math.max(0, demoBalance + partialPnL);
@@ -6548,10 +6546,7 @@ function checkDemoPositions() {
   demoPositions.forEach(pos => {
     if(closeData.find(c => c.pos.id === pos.id)) return; // already queued by TIME_EXIT
     const isBuy = pos.dir === 'UP';
-    // Runner mode only suppresses the hard TP once the trailing SL is
-    // already guaranteed to pay out at least as much as TP would have —
-    // see tpAlreadyGuaranteed() above. Otherwise TP always fires on touch.
-    const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
+    const runnerMode = (pos.trailPhase || 0) >= 3;
     if(isBuy) {
       if(mid <= pos.slPrice) {
         const exitReason = (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL';
@@ -7004,12 +6999,11 @@ function checkRiskOverflow(slDist, quality, useBalance, opts) {
   const tradeableCapital = floor > 0 ? Math.max(0, (bal - floor) * 0.80) : bal;
   const targetRisk = Math.min(bal * riskPct / 100, tradeableCapital * riskPct / 100);
 
-  // Signal-quality, balance-growth, market-regime, and session size
-  // multipliers have been removed — every trade sizes off the same base
-  // risk (qMult/growthFactor/regimeMult/sessionMult are kept at 1.0 as
-  // neutral placeholders so the rest of this pipeline, e.g. the
-  // portfolio-heat guard below, doesn't need to change shape).
+  // ── Quality-score multiplier (1.0 baseline, up to 1.35x for elite) ──
   let qMult = 1.0;
+  if (opts.qualityScore && opts.qualityScore > 65) {
+    qMult = Math.min(1.35, 1.0 + (opts.qualityScore - 65) * 0.006);
+  }
   const growthFactor = 1.0;
 
   // ── Portfolio-heat guard ──
@@ -7351,6 +7345,20 @@ function runStrategy() {
 
   // ── CONCURRENT POSITION CAP ──
   if (demoPositions.length >= CFG.MAX_CONCURRENT_POS) return;
+
+  // ── SPREAD GUARD ──
+  const liveSpread = getLiveSpread(newsEngine.state);
+  const sessionBaseline = (() => {
+    const h = new Date().getUTCHours();
+    if (h >= 13 && h < 15) return 3.5;   // NY/LON overlap (tightest)
+    if (h >= 7  && h < 9)  return 4.0;   // London open
+    if (h >= 0  && h < 3)  return 8.0;   // Dead Asian
+    return 5.0;                           // Default
+  })();
+  if (liveSpread > Math.max(10, sessionBaseline * 1.5)) {
+    addSignal('info', `Spread guard: $${liveSpread.toFixed(2)} exceeds limit — skipping entry`, null);
+    return;
+  }
 
   // ── EVALUATE SIGNALS ──
   // Strategy chain: M5 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
@@ -8031,7 +8039,9 @@ const replay = {
 
         pos.partialTaken = true;
         const halfUnits = pos.posUnits * 0.50;
-        const partialPnL = isBuy ? (price - pos.entry) * halfUnits : (pos.entry - price) * halfUnits;
+        const grossPartialPnL = isBuy ? (price - pos.entry) * halfUnits : (pos.entry - price) * halfUnits;
+        const partialCommission = (pos.lots * 0.5) * CFG.COMMISSION_PER_LOT;
+        const partialPnL = grossPartialPnL - partialCommission;
         this.replayBal = Math.max(0, this.replayBal + partialPnL);
 
         pos.lots     = +((pos.lots || 0.01) * 0.50).toFixed(2);
@@ -8175,12 +8185,7 @@ const replay = {
         }
 
         // ── SL then TP hit check against the raw path price ──────────────
-        // Runner mode: Phase 3 only disables the hard TP close once the
-        // trailing SL is already guaranteed to pay out at least as much as
-        // TP would have (tpAlreadyGuaranteed) — matches the live-path fix
-        // in checkDemoPositions, so backtest and live make identical exit
-        // decisions given identical price paths.
-        const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
+        const runnerMode = (pos.trailPhase || 0) >= 3;
         if (isBuy) {
           if (price <= pos.slPrice) {
             const exitReason = (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL';
@@ -9529,7 +9534,7 @@ function _scanGapPositions() {
             if (trail.newSL !== pos.slPrice) { pos.slPrice = trail.newSL; pos.slAmount = 0; }
           }
         }
-        const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
+        const runnerMode = (pos.trailPhase || 0) >= 3;
         const ph = pos.trailPhase || 0;
         if (isBuy) {
           if (price <= pos.slPrice) {
