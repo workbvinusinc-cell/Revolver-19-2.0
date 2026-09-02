@@ -2156,15 +2156,15 @@ const REFINED_STRATEGY_CFG = {
     // strongScore/"B" removed — only three grades ever fire: B+, A, A+ (see
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
-    minimumScore: 53,
-    // Lowered per request: plusScore 78→72, premiumScore 83→80,
-    // eliteScore 100→92 — pulls all three grade floors down together.
-    plusScore: 72,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 80,    // A  floor — the entry gate for COUNTER-trend setups
-    eliteScore: 92,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+    minimumScore: 62,
+    // Updated per request: plusScore 72→80, premiumScore 80→85,
+    // eliteScore 92→97 — raises all three grade floors together.
+    plusScore: 80,        // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 85,    // A  floor — the entry gate for COUNTER-trend setups
+    eliteScore: 97,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
                           // scoreTotal is clamped to 0-100 (see clamp(..., 0, 100) in
-                          // evaluate()), and 92 sits well under that ceiling, so A+ is
-                          // comfortably reachable now (was "barely reachable" at 100).
+                          // evaluate()), so 97 is still reachable but only for
+                          // near-perfect setups.
 
     weights: {
       liquidity: 20,
@@ -5629,8 +5629,8 @@ function updateStrengthGauge(buyStrength, sellStrength) {
   const value = Math.round(isBuyLeading ? b : s);
 
   const cfg = (typeof RefinedStrategy !== 'undefined') ? RefinedStrategy.config.quality : null;
-  const minFloor = cfg ? cfg.minimumScore : 53;
-  const fireFloor = cfg ? cfg.plusScore   : 72;
+  const minFloor = cfg ? cfg.minimumScore : 62;
+  const fireFloor = cfg ? cfg.plusScore   : 80;
 
   num.textContent = value;
   fill.style.width = value + '%';
