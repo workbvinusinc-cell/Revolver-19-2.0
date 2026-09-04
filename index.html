@@ -2062,6 +2062,27 @@ function calcClosePnL(pos, exitPrice, reason) {
   return gross - commission;
 }
 
+// ── PREVIEW-ONLY close PnL (chart SL/BE/TRAIL/TP line labels) ──
+// Deliberately NOT calcClosePnL: that function draws from the seeded RNG
+// (getExitSlippage → RNG.rand()) to model real fill slippage, which is
+// correct for an ACTUAL close but wrong to call from drawChart(). The chart
+// re-renders every tick/frame — calling calcClosePnL there would burn RNG
+// draws that were never meant to happen, desyncing the draw sequence from
+// what a real close at that moment would consume and silently changing
+// every subsequent "random" outcome for the rest of the run (the same
+// determinism break the seeded-RNG backtest replay was built to prevent).
+// This mirrors calcClosePnL's math exactly minus the slippage draw — close
+// enough for a live preview label, since the real slippage amount is
+// unknowable until the level is actually hit anyway.
+function previewClosePnL(pos, exitPrice) {
+  if (exitPrice === undefined || !pos.entry) return 0;
+  const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
+  const units = pos.posUnits || (pos.lots || 0) * CONTRACT_SIZE || 0;
+  const gross = (isBuy ? (exitPrice - pos.entry) : (pos.entry - exitPrice)) * units;
+  const commission = (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
+  return gross - commission;
+}
+
 // ── SWAP (overnight financing) ──
 // Calibrated to a live Exness BTCUSDm contract spec (CFG.SWAP_LONG_PTS /
 // CFG.SWAP_SHORT_PTS, in points — see the CFG comment for the source
@@ -6151,12 +6172,26 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const inProfit = isBuy ? (midForPnl >= entryPrice) : (midForPnl <= entryPrice);
     const pnlColor = inProfit ? '#448aff' : '#ef5350';
     const entryLabel = `${isBuy ? 'BUY' : 'SELL'} ${lotSz}L ${grade}${beLock} · ${pnlSign}$${Math.abs(livePnl).toFixed(2)}`;
-    const slLoss = pos.beTriggered ? 0 : (pos.slAmount || Math.abs(pos.entry - pos.slPrice) * (pos.lots || 0.01) * 100 || 0);
-    const slLineLabel = pos.trailActive
-      ? `TRAIL · SL ${pos.slPrice.toFixed(2)}`
-      : pos.beTriggered ? `BE  ·  $0.00` : `SL  ·  -$${slLoss.toFixed(2)}`;
-    const tpGain = pos.tpAmount || 0;
-    const tpLineLabel = `TP  ·  +$${tpGain.toFixed(2)}`;
+
+    // ── BUG FIX: SL/BE/TRAIL and TP line $ figures used to be hardcoded or
+    // preset instead of derived from the position's actual current state —
+    // the SL line showed a flat "$0.00" for ANY beTriggered position
+    // regardless of the real locked-in amount (Phase 1's BE lock guarantees
+    // entry±beDist, a small WIN, not a literal $0 wash, and Phase 2/3
+    // trailing locks in more than that as price runs), the TRAIL line
+    // showed a raw price instead of a $ figure at all, and the TP line used
+    // the preset pos.tpAmount, which can drift from reality once lots gets
+    // floored/capped or a partial close shrinks the remaining size.
+    // calcClosePnL() is the exact same function that pays out a REAL close
+    // (TP/SL/BE/TRAIL) — using it here means every line on the chart always
+    // shows precisely what would be booked if price hit that level right
+    // now, for the position's actual current size, matching the trade log
+    // exactly instead of an approximation that can go stale mid-trade.
+    const slPnl = previewClosePnL(pos, slPrice);
+    const slSign = slPnl >= 0 ? '+' : '-';
+    const slLineLabel = `${slLabel}  ·  ${slSign}$${Math.abs(slPnl).toFixed(2)}`;
+    const tpPnl = previewClosePnL(pos, tpPrice);
+    const tpLineLabel = `TP  ·  +$${Math.abs(tpPnl).toFixed(2)}`;
 
     if (tpPrice !== undefined) drawMT5TradeLine(tpPrice, MT5C.tp, tpLineLabel, tpPrice, 'dash');
     if (slPrice !== undefined) drawMT5TradeLine(slPrice, slColor, slLineLabel, slPrice, 'dash');
