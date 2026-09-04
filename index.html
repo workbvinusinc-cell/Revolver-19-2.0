@@ -1492,6 +1492,18 @@ const CFG = {
   MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
   MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
+  // ── ML WIN-PROBABILITY GATE ──
+  // Once WinModel has seen MODEL_MIN_SAMPLES closed trades, any setup whose
+  // *learned* predicted win probability falls below MODEL_MIN_PROB is
+  // skipped even if it clears the static quality-score gate. Before that
+  // sample floor, the model only observes and logs — it never blocks a
+  // trade — because a model trained on a handful of trades is closer to
+  // noise than to signal. Flip MODEL_GATE_ENABLED off to run in
+  // observe-only mode indefinitely (useful for validating the model itself
+  // against live results before letting it touch entries).
+  MODEL_GATE_ENABLED: true,
+  MODEL_MIN_SAMPLES : 30,
+  MODEL_MIN_PROB    : 0.42,
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
   // boosted risk). Since this bot only trades BTCUSD, concurrent positions
   // are highly correlated — this stops the per-trade quality size bonus from
@@ -1501,9 +1513,15 @@ const CFG = {
   MAX_PORTFOLIO_HEAT_R: 2.0,
   // ── Three-Phase Trailing Stop ──
   TRAIL_ENABLED: true,
-  TRAIL_PHASE_1: 60,          // % to TP for BE lock — raised from 50% to avoid premature BE on volatility
-  TRAIL_PHASE_2: 80,          // % to TP for 40% trail
-  TRAIL_PHASE_3: 93,          // % to TP for 60% runner trail
+  // BE lock eased back from 60% → 52% of the way to TP. 60% was raised
+  // specifically to dodge premature BE on volatility, but it also meant a
+  // lot of trades that got most of the way to TP and then reversed still
+  // paid out a full SL loss instead of scratching at breakeven — directly
+  // inflating both the SL-hit count and drawdown the bot is trying to cut.
+  // 52% still requires a real, non-noise move in favor before locking BE.
+  TRAIL_PHASE_1: 52,          // % to TP for BE lock
+  TRAIL_PHASE_2: 74,          // % to TP for 40% trail
+  TRAIL_PHASE_3: 90,          // % to TP for 60% runner trail
   TRAIL_DIST   : 2.0,         // Min trail distance in $ — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
   // ── Blow-Proof Safety Layer Settings (user-configurable) ──
   SAFETY_HARD_FLOOR_PCT   : 10,   // % of start balance = hard floor
@@ -2260,16 +2278,18 @@ const REFINED_STRATEGY_CFG = {
   // the bot now fires far more often — it no longer needs five separate
   // structural conditions to line up at once.
   simple: {
-    // Raised back up — a 3-bar range is trivial to "break" on 1-min BTCUSD
-    // noise, and the resulting SL (which anchors off this same lookback low)
-    // ends up sitting right where the next normal wiggle retests it. A wider
-    // lookback means the breakout has to clear a level that actually meant
-    // something, and it gives the SL underneath it real room.
-    lookbackBars: 8,
-    // Raised back up — 0.10 let near-doji "breakouts" (barely more than a
-    // wick past the range) trigger trades. Requiring real conviction in the
-    // candle body cuts the fakeout rate at the trigger itself.
-    minBodyRatio: 0.35,
+    // Dialed back from 8 — a 3-bar range was too trivial to break (noise),
+    // but 8 made the trigger itself the main bottleneck on trade count.
+    // 6 keeps a level with some real meaning behind it while letting more
+    // of the day's genuine breakouts through the trigger stage; the
+    // quality score below (not this trigger) is now the primary filter
+    // for whether a triggered setup is actually good.
+    lookbackBars: 6,
+    // Dialed back from 0.35 — that required a near-maximum-conviction
+    // candle to trigger at all, which is rarer than it needs to be. 0.28
+    // still rules out doji/indecision candles but doesn't demand an
+    // outlier bar just to get evaluated.
+    minBodyRatio: 0.28,
     useTrendFilter: true,   // was false — re-enabled: trading with the M5 trend is the single biggest lever
                              // for setups that "almost win" rather than firing into a countertrend fade.
                              // NOTE: this is a SOFT filter (see evaluate() below) — it does not block
@@ -2286,10 +2306,13 @@ const REFINED_STRATEGY_CFG = {
     avoidNewsRelease: true,  // was false — re-enabled: the ±5min release window is where spread spikes and
                               // fake wicks live, the fastest way to turn a good setup into a near-miss loss
     roomLookbackBars: 25,    // window used to check for a nearby opposing swing extreme ahead of the trade
-    // Raised back up — 0.2 ATR of runway is almost nothing; it let the bot
-    // buy/sell right into a wall a bar or two away, which is a classic
-    // immediate-SL setup. 0.5 ATR gives the move somewhere to actually go.
-    minRoomATR: 0.5
+    // Kept a real (not trivial) room requirement — this is one of the two
+    // filters (along with the hard wick-rejection cut below) doing the most
+    // work to keep SL-hit rate down, so it's a bad lever to loosen for
+    // frequency. Eased slightly from 0.5 → 0.4 ATR: still rejects "buying
+    // right into the wall" setups, just no longer requires an unusually
+    // clear runway on top of that.
+    minRoomATR: 0.4
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -2364,28 +2387,19 @@ const REFINED_STRATEGY_CFG = {
 
   // ---------- Quality engine ----------
   quality: {
-    // ── Gates raised 27% (thresholds × 1.27) per request — stricter score
-    // floor for every tier, so only higher-scoring setups clear the bar and
-    // get taken. The actual entry gate is plusScore (trend-aligned) /
-    // premiumScore (counter-trend) down in evaluate(). Was: minimumScore 42,
-    // strongScore 45, plusScore 55, premiumScore 65, eliteScore 82. ──
+    // ── Gates raised again per explicit follow-up request: what was 64 →
+    // 77, what was 74 → 84, what was 90 → 97. This lands selectivity close
+    // to (just under) the earlier 78/83/100 gates that had cut Strategy 1's
+    // volume too far, while keeping eliteScore just below the 100 clamp
+    // ceiling so A+ stays actually reachable. ──
     //
     // strongScore/"B" removed — only three grades ever fire: B+, A, A+ (see
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    // Raised 70 → 78 — the trend-aligned gate is the volume lever (it's the
-    // gate the vast majority of trades pass through). Pushing it up trades
-    // trade count for selectivity — this plus the two changes below is the
-    // combined lever for cutting frequency while skewing what's cut toward
-    // the weaker setups specifically, not a random subsample.
-    plusScore: 78,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 83,    // A  floor — the entry gate for COUNTER-trend setups
-    eliteScore: 100,     // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
-                          // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
-                          // (see clamp(..., 0, 100) in evaluate()), so 104 would make A+
-                          // mathematically unreachable — no setup could ever score that high.
-                          // Capped at 100, the actual ceiling, so A+ stays reachable (barely).
+    plusScore: 77,        // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 84,    // A  floor — the entry gate for COUNTER-trend setups
+    eliteScore: 97,       // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
 
     weights: {
       liquidity: 20,
@@ -3645,20 +3659,14 @@ const RefinedStrategy = (() => {
 
     const scoreTotal = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
 
-    // ── Approval — trend-aligned setups only need the normal floor; a
-    // counter-trend setup now has to clear premiumScore (A) — see below —
-    // since it's already giving up the full 25-pt trendScore bonus and needs
-    // to make that back elsewhere (breakout strength / regime / room) to
-    // prove it's a genuinely good exception rather than just fading the
-    // trend. ──
-    // Counter-trend setups now need premiumScore (A), not just plusScore (B+) —
-    // fading the M5 trend is the setup most prone to getting swept back
-    // through by the very trend it's fighting, so it should clear a
-    // meaningfully higher bar than "one grade above the floor".
-    // Gate raised to B+ floor for ALL setups (was minimumScore/42 for
-    // trend-aligned) — bot now only ever takes B+, A, or A+ grade trades.
-    // Counter-trend still needs the higher premiumScore/A bar on top of that.
-    const requiredScore = counterTrend ? C.quality.premiumScore : C.quality.plusScore;
+    // ── Approval — raised again per explicit request: the bot must never
+    // take a 1-star or 2-star (B+) trade, only 3-star (A / A+) setups.
+    // Both trend-aligned AND counter-trend setups now have to clear
+    // premiumScore — plusScore (B+) is no longer a firing gate for anyone,
+    // it only still exists as the boundary refinedScoreToLegacyGrade() uses
+    // (now unreachable from below since nothing approves under premiumScore
+    // anyway, so every trade that fires is legacyGrade 3 / ★★★). ──
+    const requiredScore = C.quality.premiumScore;
     const approved = scoreTotal >= requiredScore;
 
     if (!approved) {
@@ -3672,9 +3680,9 @@ const RefinedStrategy = (() => {
       };
     }
 
-    // Only three grades ever fire: by this point `approved` already
-    // guaranteed scoreTotal >= plusScore (or premiumScore for counter-trend),
-    // so anything that isn't A+ or A is B+ — B and C are never reachable.
+    // Only two grades can ever fire now: approved already guaranteed
+    // scoreTotal >= premiumScore, so anything that isn't A+ is A — B+, B,
+    // and C are never reachable.
     const grade = scoreTotal >= C.quality.eliteScore   ? "A+"
                 : scoreTotal >= C.quality.premiumScore ? "A"
                 : "B+";
@@ -4519,20 +4527,27 @@ const EMA_PULLBACK_CFG = {
   // EMA9 must lead EMA21 by at least this many ATR for a trend to count —
   // keeps the filter from firing on a flat chop where the two EMAs are
   // basically stacked on top of each other with no real separation.
-  trendSeparationATR: 0.12,
+  // Eased 0.12 → 0.10 so a trend counts a little earlier, without opening
+  // it up to a genuinely flat/choppy tape.
+  trendSeparationATR: 0.10,
 
   // How close the pullback candle's low (BUY) / high (SELL) must come to
-  // EMA9 to count as an actual "touch" of the fast average.
-  pullbackToleranceATR: 0.55,
+  // EMA9 to count as an actual "touch" of the fast average. Widened
+  // 0.55 → 0.65 ATR — this was rejecting valid pullbacks that touched
+  // slightly wide of EMA9 on a fast-moving M1 tape, which is exactly the
+  // setup this strategy exists to catch.
+  pullbackToleranceATR: 0.65,
 
   // Reclaim candle needs a real body — not a doji stalling at the EMA.
-  minBodyRatio: 0.30,
+  // Eased 0.30 → 0.25, in line with Strategy 1's body-ratio easing.
+  minBodyRatio: 0.25,
 
   swingLookback: 10,      // bars back to find the structural SL reference
   slBufferATR: 0.30,
 
   roomLookbackBars: 20,   // window checked for a nearby opposing wall
-  minRoomATR: 0.4,
+  minRoomATR: 0.35,       // eased from 0.4 — room here is scored, not a hard
+                          // reject, so this mainly affects the score, not signal count
 
   avoidDeadRegime: true,
   avoidNewsRelease: true,
@@ -4541,7 +4556,12 @@ const EMA_PULLBACK_CFG = {
   priceTolerance: 0.15,
 
   quality: {
-    minimumScore: 50,   // approval floor — below this the setup is skipped
+    // Raised to the 3-star floor — pullbackScoreToLegacyGrade() maps
+    // score>=85 to legacyGrade 3 (★★★), so approving anything below 85
+    // let 1-star and 2-star trades fire. This is now the same bar
+    // (premiumScore-equivalent) Strategy 1 was just raised to, so no
+    // strategy takes a sub-3-star trade.
+    minimumScore: 85,   // approval floor — below this the setup is skipped
     weights: { trend: 30, body: 22, precision: 18, room: 15, regime: 15 }
   }
 };
@@ -4781,17 +4801,23 @@ const RANGE_BOUNCE_CFG = {
 
   // Channel must span at least this many ATR to count as a real, tradeable
   // range — too narrow and it's just noise, not a level worth fading.
-  minRangeATR: 3.5,
+  // Eased 3.5 → 3.0 — 3.5 was screening out a lot of ordinary, still-
+  // tradeable BTCUSD ranges, and range days already have the fewest
+  // candidate setups of the three strategies.
+  minRangeATR: 3.0,
   // Too wide and it's not really "ranging" anymore — more likely a trend
   // that Strategy 1/2 should be handling instead. Skip rather than fade it.
   maxRangeATR: 14,
 
   // How close the trigger candle's wick must reach to the channel edge to
-  // count as an actual sweep of that level.
-  edgeToleranceATR: 0.35,
+  // count as an actual sweep of that level. Eased slightly (0.35 → 0.40)
+  // to count near-edge wicks, not just ones that reach exactly to it.
+  edgeToleranceATR: 0.40,
   // Rejection wick needs to be a meaningful fraction of the candle's total
   // range — a small poke-through with no real rejection isn't a signal.
-  wickRejectionRatio: 0.45,
+  // Eased 0.45 → 0.40, still requires the wick to be the dominant feature
+  // of the candle, just not an outlier one.
+  wickRejectionRatio: 0.40,
   // How far back inside the channel the close must land, past the edge.
   reclaimBufferATR: 0.15,
 
@@ -4808,7 +4834,10 @@ const RANGE_BOUNCE_CFG = {
   priceTolerance: 0.15,
 
   quality: {
-    minimumScore: 50,
+    // Raised to the 3-star floor — rangeBounceScoreToLegacyGrade() maps
+    // score>=85 to legacyGrade 3 (★★★); matches Strategy 1 & 2's gate so
+    // no strategy ever takes a 1-star or 2-star trade.
+    minimumScore: 85,
     weights: { depth: 20, wick: 30, precision: 20, room: 15, regime: 15 }
   }
 };
@@ -6910,6 +6939,25 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const rr = gradeRRContinuous(qualityScore) ?? gradeRR(quality);
   const tpPrice = isBuy ? entryPrice + slDist * rr : entryPrice - slDist * rr;
 
+  // ── ML WIN-PROBABILITY GATE ──
+  // Score-based gating only filters for "looks like a good setup" — it was
+  // never checked against whether THIS bot's trades with that profile
+  // actually won. WinModel learns that mapping from closed trades and, once
+  // it has enough of them, blocks setups whose learned win probability is
+  // below floor even though they passed the static quality gate.
+  const mlAtrArr = candles[currentTF];
+  const mlAtrN = mlAtrArr && mlAtrArr.length >= 14 ? mlAtrArr.slice(-14) : (mlAtrArr || []);
+  const mlAtr = mlAtrN.length > 0 ? mlAtrN.reduce((s, c) => s + c.high - c.low, 0) / mlAtrN.length : 150;
+  const mlFeat = WinModel.extractFeatures(rawSetup, {
+    qualityScore, rr, slDist, spread: dynSpread, atr: mlAtr, isBuy
+  });
+  const predictedWin = WinModel.predict(mlFeat);
+  if (CFG.MODEL_GATE_ENABLED && WinModel.n >= CFG.MODEL_MIN_SAMPLES && predictedWin < CFG.MODEL_MIN_PROB) {
+    addSignal('warn',
+      `ML gate: predicted win ${(predictedWin*100).toFixed(0)}% (model n=${WinModel.n}, acc=${WinModel.accuracy()!=null ? (WinModel.accuracy()*100).toFixed(0)+'%' : '—'}) below ${(CFG.MODEL_MIN_PROB*100).toFixed(0)}% floor — skipping despite score gate`, mid);
+    return;
+  }
+
   // ── POSITION SIZING ──
   const riskCheck = checkRiskOverflow(slDist, quality, undefined, { usePositions: demoPositions, useMid: mid, qualityScore });
   const lots = riskCheck.lots;
@@ -6940,17 +6988,19 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
     qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
     beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openTime: Date.now(),
     partialTaken: false,  // Survival Engine: partial TP at 70% progress (closes 50%, SL → BE)
+    mlFeat: mlFeat, predictedWin: predictedWin,  // carried to close time for WinModel.update()
   };
   demoPositions.push(pos);
   updateRiskAudit(riskCheck, pos);
   addSignal(dir==='UP'?'buy':'sell',
-    `${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L ${grade}${newsTag}${riskTag} @ ${entryPrice.toFixed(2)} | SL:${slPrice.toFixed(2)} TP:${tpPrice.toFixed(2)} | sprd:$${dynSpread} slip:$${slip.toFixed(2)}`, mid);
+    `${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L ${grade}${newsTag}${riskTag} @ ${entryPrice.toFixed(2)} | SL:${slPrice.toFixed(2)} TP:${tpPrice.toFixed(2)} | sprd:$${dynSpread} slip:$${slip.toFixed(2)} | ML:${(predictedWin*100).toFixed(0)}%`, mid);
   const logEntry = {
     id: pos.id, dir: isBuy?'BUY':'SELL', entry: entryPrice, status: 'open', pnl: null,
     tpPrice: pos.tpPrice, slPrice: pos.slPrice, lots: adjLots,
     slDist: +slDist.toFixed(2), slAmount: +slAmount.toFixed(2), tpAmount: +tpAmount.toFixed(2),
     quality, openTime: Date.now(), newsState: newsEngine.state,
     dynSpread: +dynSpread.toFixed(2), slip: +slip.toFixed(2),
+    predictedWin: +predictedWin.toFixed(3),
   };
   demoTradeLog.unshift(logEntry);
   updateLastTrade({...logEntry, entry:entryPrice});
@@ -7251,6 +7301,8 @@ function checkDemoPositions() {
     // real gains vs the actual balance. Log it as a separate closed trade. ──
     wins++; consecutiveWins++; consecutiveLosses = 0;
     if (riskHalved) { riskHalved = false; addSignal('info', `Win — risk restored to normal (${consecutiveWins}W streak)`, null); }
+    // Partial TP is a realized win for this setup profile — train on it too.
+    if (pos.mlFeat) WinModel.update(pos.mlFeat, true);
     demoTradeLog.unshift({
       id: pos.id + '_partial_' + Date.now(),
       dir: dirLbl, entry: pos.entry, status: 'PARTIAL', pnl: +partialPnL.toFixed(2),
@@ -7346,6 +7398,14 @@ function checkDemoPositions() {
       if(consecutiveLosses >= SAFETY.CONSEC_LOSS_HALVE) {
         riskHalved = true;
         addSignal('warn',`${consecutiveLosses}x consecutive losses — risk halved until next win`, null);
+      }
+    }
+    // Train the ML win-probability model on this actual outcome.
+    if (pos.mlFeat) {
+      WinModel.update(pos.mlFeat, pnl > 0);
+      if (WinModel.n % 20 === 0) {
+        addSignal('info',
+          `ML model: n=${WinModel.n} trades trained, live accuracy ${(WinModel.accuracy()*100).toFixed(0)}%${WinModel.n < CFG.MODEL_MIN_SAMPLES ? ' (observing — gate not active yet)' : ''}`, null);
       }
     }
     if(hardFloor > 0 && demoBalance <= hardFloor) {
@@ -8390,8 +8450,15 @@ const Storage = {
   db: null,
   init() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('PA_BOT_DB', 1);
-      req.onupgradeneeded = e => { e.target.result.createObjectStore('trades', { keyPath: 'id' }); };
+      // Bumped 1 → 2 to add the 'model' store for WinModel's learned
+      // weights, so the ML gate's training carries over across reloads
+      // instead of restarting cold every session.
+      const req = indexedDB.open('PA_BOT_DB', 2);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('trades')) db.createObjectStore('trades', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('model'))  db.createObjectStore('model',  { keyPath: 'id' });
+      };
       req.onsuccess = () => { this.db = req.result; resolve(); };
       req.onerror = () => { addSignal('warn','IndexedDB failed — trade history will not persist',null); reject(); };
     });
@@ -8400,6 +8467,122 @@ const Storage = {
     if (!this.db) return;
     const tx = this.db.transaction('trades', 'readwrite');
     tx.objectStore('trades').put(trade);
+  },
+  saveModel(state) {
+    if (!this.db) return;
+    const tx = this.db.transaction('model', 'readwrite');
+    tx.objectStore('model').put(state);
+  },
+  loadModel() {
+    return new Promise((resolve) => {
+      if (!this.db) return resolve(null);
+      const tx = this.db.transaction('model', 'readonly');
+      const req = tx.objectStore('model').get('winmodel');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  }
+};
+
+// ════════════════════════════════════════════════════════════
+//  ML WIN-PROBABILITY MODEL — online logistic regression
+// ════════════════════════════════════════════════════════════
+// The quality score is a hand-weighted pattern-conformity score — it was
+// never validated against this bot's actual outcomes. WinModel closes that
+// gap: it learns, from the bot's OWN closed trades, which feature profiles
+// actually went on to win, and produces a calibrated win probability per
+// setup. It trains incrementally (one SGD step per closed trade) so it
+// keeps adapting as market conditions drift, and persists its weights to
+// IndexedDB so training isn't lost on reload.
+//
+// Feature set is a fixed-width union of every quality-component name used
+// across both signal pipelines (Strategy 1's simple breakout components AND
+// the ICT-style components), plus a few context features (planned RR,
+// spread-as-fraction-of-SL, direction, volatility regime). Whichever
+// pipeline fired, only the components it actually produced are non-zero —
+// the rest default to 0 — so a single fixed-length weight vector covers
+// both.
+const ML_FEATURES = [
+  'bias', 'scoreTotal',
+  'comp_breakout', 'comp_trend', 'comp_regime', 'comp_room', 'comp_wickPenalty',
+  'comp_liquidity', 'comp_structure', 'comp_orderBlock', 'comp_fvg', 'comp_retracement', 'comp_sequence',
+  'counterTrend', 'rr', 'spreadCostRatio', 'volRegime', 'isBuy'
+];
+
+const WinModel = {
+  weights: new Array(ML_FEATURES.length).fill(0),
+  n: 0,        // trades trained on so far
+  correct: 0,  // running (predicted>0.5 === actual) tally, for a rough live accuracy readout
+  lr: 0.08,    // SGD learning rate
+  l2: 0.001,   // small L2 penalty so weights don't run away on a short, noisy history
+
+  _sigmoid(z) { return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z)))); },
+
+  // Pulls whatever quality.components the firing setup produced, normalizes
+  // each to roughly 0–1, and fills in context features. Missing components
+  // (the other pipeline's fields) stay 0 rather than erroring.
+  extractFeatures(rawSetup, ctx) {
+    const comp = (rawSetup && rawSetup.quality && rawSetup.quality.components) || {};
+    const f = {};
+    ML_FEATURES.forEach(k => f[k] = 0);
+    f.bias             = 1;
+    f.scoreTotal        = (ctx.qualityScore || 0) / 100;
+    f.comp_breakout     = (comp.breakout    || 0) / 40;
+    f.comp_trend        = (comp.trend       || 0) / 40;
+    f.comp_regime       = (comp.regime      || 0) / 40;
+    f.comp_room         = (comp.room        || 0) / 40;
+    f.comp_wickPenalty  = (comp.wickPenalty || 0) / 20;
+    f.comp_liquidity    = (comp.liquidity   || 0) / 20;
+    f.comp_structure    = (comp.structure   || 0) / 20;
+    f.comp_orderBlock   = (comp.orderBlock  || 0) / 20;
+    f.comp_fvg          = (comp.fvg         || 0) / 15;
+    f.comp_retracement  = (comp.retracement || 0) / 20;
+    f.comp_sequence     = (comp.sequence    || 0) / 10;
+    f.counterTrend      = (rawSetup && rawSetup.counterTrend) ? 1 : 0;
+    f.rr                = Math.min(3, ctx.rr || 1);
+    f.spreadCostRatio   = ctx.slDist ? Math.min(1, (ctx.spread || 0) / ctx.slDist) : 0;
+    f.volRegime         = Math.min(2, ctx.atr ? ctx.atr / 150 : 1);
+    f.isBuy             = ctx.isBuy ? 1 : 0;
+    return f;
+  },
+
+  vector(f) { return ML_FEATURES.map(k => f[k] || 0); },
+
+  predict(f) {
+    const v = this.vector(f);
+    let z = 0;
+    for (let i = 0; i < v.length; i++) z += v[i] * this.weights[i];
+    return this._sigmoid(z);
+  },
+
+  // One online SGD step. Call once per closed trade with the feature map
+  // captured at entry and whether it ultimately won.
+  update(f, won) {
+    const v = this.vector(f);
+    const p = this.predict(f);
+    const y = won ? 1 : 0;
+    if ((p > 0.5) === (y === 1)) this.correct++;
+    this.n++;
+    for (let i = 0; i < v.length; i++) {
+      const grad = (p - y) * v[i] + this.l2 * this.weights[i];
+      this.weights[i] -= this.lr * grad;
+    }
+    this._persist();
+  },
+
+  accuracy() { return this.n ? this.correct / this.n : null; },
+
+  _persist() {
+    Storage.saveModel({ id: 'winmodel', weights: this.weights, n: this.n, correct: this.correct });
+  },
+
+  async load() {
+    const saved = await Storage.loadModel();
+    if (saved) {
+      this.weights = saved.weights && saved.weights.length === ML_FEATURES.length ? saved.weights : this.weights;
+      this.n = saved.n || 0;
+      this.correct = saved.correct || 0;
+    }
   }
 };
 
@@ -10584,6 +10767,7 @@ function _scanGapPositions() {
         addSignal('warn', `${consecutiveLosses}x consecutive losses — risk halved`, null);
       }
     }
+    if (pos.mlFeat) WinModel.update(pos.mlFeat, pnl > 0);
     if (hardFloor > 0 && demoBalance <= hardFloor) {
       addSignal('warn', `[REPORT] HARD FLOOR REACHED — balance $${demoBalance.toFixed(2)}. Trading continues.`, null);
     }
@@ -10620,7 +10804,7 @@ resizeCV();
 loadSettings();
 updateProfitLockUI();
 setBtToday();
-Storage.init().catch(() => {});
+Storage.init().then(() => WinModel.load()).catch(() => {});
 bootApp();
 setInterval(drawChart, 1000);
 setInterval(updateStatsStrip, 3000);
