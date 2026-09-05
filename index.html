@@ -986,6 +986,46 @@ input[type=range]::-webkit-slider-thumb{
       <div class="deposit-notice-title">Set Your Starting Balance</div>
       <div class="deposit-notice-text">Enter an amount below to fund your demo account, then press <strong>Save &amp; Apply</strong> to begin trading.</div>
     </div>
+    <div class="settings-section" id="brokerSection">
+      <div class="settings-section-title">🔌 Broker Connection — MetaApi (Exness)</div>
+      <div class="field">
+        <label style="display:flex;align-items:center;justify-content:space-between">
+          <span>Live Trading</span>
+          <input type="checkbox" id="cfgBrokerEnabled"/>
+        </label>
+        <div class="field-hint" style="color:var(--red)">When ON, every signal sends a real market order to your Exness account via MetaApi, with real SL/TP. Run Test Connection first — it must show CONNECTED.</div>
+      </div>
+      <div class="field">
+        <label>MetaApi Account ID</label>
+        <div class="field-row"><input class="finput" type="text" id="cfgBrokerAccountId" placeholder="e.g. 2b93f6a7-692f-4332-..."/></div>
+      </div>
+      <div class="field">
+        <label>MetaApi API Token</label>
+        <div class="field-row"><input class="finput" type="password" id="cfgBrokerToken" placeholder="paste token"/></div>
+        <div class="field-hint">Stored only in this browser's local storage — never sent anywhere except MetaApi's API.</div>
+      </div>
+      <div class="field">
+        <label>Region</label>
+        <div class="field-row">
+          <select class="finput" id="cfgBrokerRegion">
+            <option value="london">london</option>
+            <option value="new-york">new-york</option>
+            <option value="singapore">singapore</option>
+            <option value="frankfurt">frankfurt</option>
+          </select>
+        </div>
+        <div class="field-hint">Shown on your account's page in the MetaApi dashboard.</div>
+      </div>
+      <div class="field">
+        <label>Symbol (exact spelling on your Exness server)</label>
+        <div class="field-row"><input class="finput" type="text" id="cfgBrokerSymbol" placeholder="BTCUSDz"/></div>
+        <div class="field-hint">Suffixes vary by server (BTCUSDz, BTCUSDm, BTCUSD.a...). Check Market Watch → Symbols in MT5. Your account's forex symbol suggests a "z" suffix on Exness-MT5Trial10.</div>
+      </div>
+      <div class="field-row" style="gap:8px;margin-top:2px;align-items:center">
+        <button class="nav-btn" onclick="testBrokerConnection()">Test Connection</button>
+        <span id="brokerStatus" style="font-size:10px;color:var(--text2)">Not tested yet</span>
+      </div>
+    </div>
     <div class="settings-section" id="riskAuditSection" style="display:none">
       <div class="settings-section-title">🔍 Risk Audit (Last Trade)</div>
       <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px 12px;font-size:9px;color:var(--text2);font-family:var(--mono)">
@@ -1458,6 +1498,103 @@ let _cbWS             = null;  // WebSocket handle — Coinbase live feed
 let _cbReconnectTimer = null;
 let _cbOpenFailures   = 0;     // consecutive failed connect attempts — backs off the reconnect loop
 
+// ── LIVE BROKER — MetaApi (Exness) integration ──
+// This app has no backend, so live orders go straight from the browser to
+// MetaApi's regional REST API using the account's API token. That's fine for
+// a personal bot on your own machine — the token only ever lives in this
+// browser's localStorage and is sent only to agiliumtrade.ai — but don't
+// deploy this page somewhere public with the token filled in.
+const LiveBroker = {
+  accountId: '',
+  token: '',
+  region: 'london',
+  symbol: 'BTCUSDz',
+  enabled: false,
+  connectionStatus: 'UNKNOWN',
+
+  baseUrl() { return `https://mt-client-api-v1.${this.region}.agiliumtrade.ai`; },
+  headers() { return { 'auth-token': this.token, 'Content-Type': 'application/json' }; },
+  configured() { return !!(this.accountId && this.token && this.region); },
+
+  async _req(path, opts = {}) {
+    if (!this.configured()) throw new Error('Broker not configured — set Account ID / Token / Region in Settings');
+    const res = await fetch(`${this.baseUrl()}${path}`, {
+      ...opts,
+      headers: { ...this.headers(), ...(opts.headers || {}) },
+    });
+    const text = await res.text();
+    let data;
+    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
+    if (!res.ok) {
+      const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return data;
+  },
+
+  async getAccountInformation() {
+    return this._req(`/users/current/accounts/${this.accountId}/account-information`);
+  },
+  async getPositions() {
+    return this._req(`/users/current/accounts/${this.accountId}/positions`);
+  },
+  async getDealsByPosition(positionId) {
+    return this._req(`/users/current/accounts/${this.accountId}/history-deals/position/${positionId}`);
+  },
+  async testConnection() {
+    const info = await this.getAccountInformation();
+    this.connectionStatus = info.connectionStatus || 'UNKNOWN';
+    return info;
+  },
+  async placeMarketOrder({ dir, volume, sl, tp, comment = 'PA Bot' }) {
+    const body = {
+      actionType: dir === 'UP' ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+      symbol: this.symbol,
+      volume: +volume.toFixed(2),
+      stopLoss: +sl.toFixed(2),
+      takeProfit: +tp.toFixed(2),
+      comment: String(comment).slice(0, 26),
+    };
+    return this._req(`/users/current/accounts/${this.accountId}/trade`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  async modifyPosition(positionId, sl, tp) {
+    const body = { actionType: 'POSITION_MODIFY', positionId, stopLoss: +sl.toFixed(2), takeProfit: +tp.toFixed(2) };
+    return this._req(`/users/current/accounts/${this.accountId}/trade`, { method: 'POST', body: JSON.stringify(body) });
+  },
+  async closePosition(positionId) {
+    return this._req(`/users/current/accounts/${this.accountId}/trade`, {
+      method: 'POST', body: JSON.stringify({ actionType: 'POSITION_CLOSE_ID', positionId }),
+    });
+  },
+
+  load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pabotBroker') || '{}');
+      this.accountId = saved.accountId || '';
+      this.token     = saved.token || '';
+      this.region    = saved.region || 'london';
+      this.symbol    = saved.symbol || 'BTCUSDz';
+      this.enabled   = !!saved.enabled;
+    } catch (e) {}
+  },
+  save() {
+    try {
+      localStorage.setItem('pabotBroker', JSON.stringify({
+        accountId: this.accountId, token: this.token, region: this.region,
+        symbol: this.symbol, enabled: this.enabled,
+      }));
+    } catch (e) {}
+  },
+};
+LiveBroker.load();
+
+function updateModeBadge() {
+  const b = document.getElementById('modeBadge');
+  if (!b) return;
+  if (LiveBroker.enabled) { b.textContent = 'LIVE'; b.className = 'badge badge-live'; }
+  else                    { b.textContent = 'DEMO'; b.className = 'badge badge-demo'; }
+}
+
 const CFG = {
   RISK_PCT     : 1.0,
   // Lowered from 3.0 — a 3R target on 1-min BTCUSD breakouts is rarely reached
@@ -1492,18 +1629,6 @@ const CFG = {
   MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
   MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
-  // ── ML WIN-PROBABILITY GATE ──
-  // Once WinModel has seen MODEL_MIN_SAMPLES closed trades, any setup whose
-  // *learned* predicted win probability falls below MODEL_MIN_PROB is
-  // skipped even if it clears the static quality-score gate. Before that
-  // sample floor, the model only observes and logs — it never blocks a
-  // trade — because a model trained on a handful of trades is closer to
-  // noise than to signal. Flip MODEL_GATE_ENABLED off to run in
-  // observe-only mode indefinitely (useful for validating the model itself
-  // against live results before letting it touch entries).
-  MODEL_GATE_ENABLED: true,
-  MODEL_MIN_SAMPLES : 30,
-  MODEL_MIN_PROB    : 0.42,
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
   // boosted risk). Since this bot only trades BTCUSD, concurrent positions
   // are highly correlated — this stops the per-trade quality size bonus from
@@ -6885,6 +7010,7 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   if(!mid) return;
   const gate = preTradeSafetyCheck();
   if(!gate.ok) return;
+  if(LiveBroker.enabled) { _executeLiveTrade(dir, ob, quality, rawSetup, qualityScore); return; }
 
   const isBuy = dir === 'UP';
   // ── LIVE SPREAD — real bid/ask from Coinbase + news overlay ──
@@ -6939,25 +7065,6 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const rr = gradeRRContinuous(qualityScore) ?? gradeRR(quality);
   const tpPrice = isBuy ? entryPrice + slDist * rr : entryPrice - slDist * rr;
 
-  // ── ML WIN-PROBABILITY GATE ──
-  // Score-based gating only filters for "looks like a good setup" — it was
-  // never checked against whether THIS bot's trades with that profile
-  // actually won. WinModel learns that mapping from closed trades and, once
-  // it has enough of them, blocks setups whose learned win probability is
-  // below floor even though they passed the static quality gate.
-  const mlAtrArr = candles[currentTF];
-  const mlAtrN = mlAtrArr && mlAtrArr.length >= 14 ? mlAtrArr.slice(-14) : (mlAtrArr || []);
-  const mlAtr = mlAtrN.length > 0 ? mlAtrN.reduce((s, c) => s + c.high - c.low, 0) / mlAtrN.length : 150;
-  const mlFeat = WinModel.extractFeatures(rawSetup, {
-    qualityScore, rr, slDist, spread: dynSpread, atr: mlAtr, isBuy
-  });
-  const predictedWin = WinModel.predict(mlFeat);
-  if (CFG.MODEL_GATE_ENABLED && WinModel.n >= CFG.MODEL_MIN_SAMPLES && predictedWin < CFG.MODEL_MIN_PROB) {
-    addSignal('warn',
-      `ML gate: predicted win ${(predictedWin*100).toFixed(0)}% (model n=${WinModel.n}, acc=${WinModel.accuracy()!=null ? (WinModel.accuracy()*100).toFixed(0)+'%' : '—'}) below ${(CFG.MODEL_MIN_PROB*100).toFixed(0)}% floor — skipping despite score gate`, mid);
-    return;
-  }
-
   // ── POSITION SIZING ──
   const riskCheck = checkRiskOverflow(slDist, quality, undefined, { usePositions: demoPositions, useMid: mid, qualityScore });
   const lots = riskCheck.lots;
@@ -6988,25 +7095,194 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
     qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
     beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openTime: Date.now(),
     partialTaken: false,  // Survival Engine: partial TP at 70% progress (closes 50%, SL → BE)
-    mlFeat: mlFeat, predictedWin: predictedWin,  // carried to close time for WinModel.update()
   };
   demoPositions.push(pos);
   updateRiskAudit(riskCheck, pos);
   addSignal(dir==='UP'?'buy':'sell',
-    `${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L ${grade}${newsTag}${riskTag} @ ${entryPrice.toFixed(2)} | SL:${slPrice.toFixed(2)} TP:${tpPrice.toFixed(2)} | sprd:$${dynSpread} slip:$${slip.toFixed(2)} | ML:${(predictedWin*100).toFixed(0)}%`, mid);
+    `${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L ${grade}${newsTag}${riskTag} @ ${entryPrice.toFixed(2)} | SL:${slPrice.toFixed(2)} TP:${tpPrice.toFixed(2)} | sprd:$${dynSpread} slip:$${slip.toFixed(2)}`, mid);
   const logEntry = {
     id: pos.id, dir: isBuy?'BUY':'SELL', entry: entryPrice, status: 'open', pnl: null,
     tpPrice: pos.tpPrice, slPrice: pos.slPrice, lots: adjLots,
     slDist: +slDist.toFixed(2), slAmount: +slAmount.toFixed(2), tpAmount: +tpAmount.toFixed(2),
     quality, openTime: Date.now(), newsState: newsEngine.state,
     dynSpread: +dynSpread.toFixed(2), slip: +slip.toFixed(2),
-    predictedWin: +predictedWin.toFixed(3),
   };
   demoTradeLog.unshift(logEntry);
   updateLastTrade({...logEntry, entry:entryPrice});
   updateDemoPositionsUI();
   updateStatsStrip();
 }
+
+// ── LIVE TRADE EXECUTION (real Exness order via MetaApi) ──
+// Mirrors _executeDemoTrade's SL/TP geometry and position-sizing exactly, but
+// instead of simulating a fill, sends a real market order to the broker and
+// builds the position from the broker's actual response. Closes are NOT
+// simulated here — the broker's own SL/TP does the closing, and
+// syncLivePositions() (polling, see below) detects the close and reconciles
+// balance/PnL from the account's real deal history.
+async function _executeLiveTrade(dir, ob, quality = 1, rawSetup = null, qualityScore = null) {
+  if(!mid) return;
+  if(!LiveBroker.configured()) { addSignal('warn','LIVE mode is on but the broker isn\'t configured — open Settings and fill in Account ID / Token / Region', null); return; }
+
+  const isBuy = dir === 'UP';
+  const refPrice = mid; // planning reference — the broker executes at the real market price
+
+  // ── SL/TP GEOMETRY — identical logic to the demo path ──
+  let slPrice, geomUsed = false;
+  if (rawSetup && rawSetup.signal) {
+    const geometry = RefinedStrategy.calculateTradeGeometry(dir === 'UP' ? 'BUY' : 'SELL', refPrice, rawSetup);
+    if (geometry.valid) { slPrice = geometry.sl; geomUsed = true; }
+  }
+  if (!geomUsed) {
+    const arr = candles[currentTF];
+    const lastN = arr && arr.length >= 14 ? arr.slice(-14) : (arr || []);
+    const atr = lastN.length > 0 ? lastN.reduce((s, c) => s + c.high - c.low, 0) / lastN.length : 150;
+    if(ob) {
+      const obBuffer = Math.max(10, Math.min(60, atr * 0.15));
+      slPrice = isBuy ? ob.low - obBuffer : ob.high + obBuffer;
+    } else {
+      slPrice = isBuy ? refPrice - atr * 1.5 : refPrice + atr * 1.5;
+    }
+  }
+  let slDist = Math.abs(refPrice - slPrice);
+  if(slDist > CFG.MAX_SL_PTS) {
+    slPrice = isBuy ? refPrice - CFG.MAX_SL_PTS : refPrice + CFG.MAX_SL_PTS;
+    slDist = CFG.MAX_SL_PTS;
+  }
+  if(slDist < 0.5) { addSignal('warn','LIVE: SL too tight (< $0.5) — skipping',null); return; }
+  const rr = gradeRRContinuous(qualityScore) ?? gradeRR(quality);
+  const tpPrice = isBuy ? refPrice + slDist * rr : refPrice - slDist * rr;
+
+  // ── SIZING — identical logic to the demo path ──
+  const riskCheck = checkRiskOverflow(slDist, quality, undefined, { usePositions: demoPositions, useMid: mid, qualityScore });
+  const newsLotMult = newsEngine.lotMultiplier();
+  const adjLots = Math.max(CFG.MIN_LOT_SIZE, Math.min(CFG.MAX_LOT_CAP, +(riskCheck.lots * newsLotMult).toFixed(2)));
+  if(adjLots < CFG.MIN_LOT_SIZE) { addSignal('warn','LIVE: insufficient sizing for the minimum lot','',null); return; }
+
+  addSignal('info', `LIVE: sending ${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L order to Exness (MetaApi)...`, mid);
+
+  let resp;
+  try {
+    resp = await LiveBroker.placeMarketOrder({ dir, volume: adjLots, sl: slPrice, tp: tpPrice });
+  } catch (e) {
+    addSignal('warn', `LIVE order FAILED: ${e.message}`, null);
+    return;
+  }
+
+  const brokerPositionId = resp.positionId || resp.orderId;
+  let entryPrice = Number(resp.price) || refPrice;
+  try {
+    const positions = await LiveBroker.getPositions();
+    const match = (positions || []).find(p => String(p.id) === String(brokerPositionId));
+    if (match && match.openPrice) entryPrice = match.openPrice;
+  } catch (e) { /* non-fatal — keep the estimated fill */ }
+
+  const posUnits = adjLots * CONTRACT_SIZE;
+  const margin = (adjLots * CONTRACT_SIZE * entryPrice) / CFG.LEVERAGE;
+  const slAmount = adjLots * CONTRACT_SIZE * Math.abs(entryPrice - slPrice);
+  const tpAmount = +(slAmount * rr).toFixed(2);
+  const grade = quality >= 3 ? '★★★' : quality === 2 ? '★★' : '★';
+
+  const pos = {
+    id: ++demoPosId, dir, entry: entryPrice, lots: adjLots, posUnits, margin,
+    slPrice, tpPrice, slAmount, tpAmount, quality, qualityScore,
+    riskAmount: slAmount, qMult: riskCheck.qMult,
+    beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openTime: Date.now(),
+    partialTaken: true,   // disables the synthetic partial-TP engine — the real broker owns this position's exit
+    live: true, brokerPositionId, brokerSyncing: false,
+  };
+  demoPositions.push(pos);
+  updateRiskAudit(riskCheck, pos);
+  addSignal(dir==='UP'?'buy':'sell',
+    `LIVE ${isBuy?'BUY':'SELL'} ${adjLots.toFixed(2)}L ${grade} @ ${entryPrice.toFixed(2)} | SL:${slPrice.toFixed(2)} TP:${tpPrice.toFixed(2)} [Exness #${brokerPositionId}]`, mid);
+  const logEntry = {
+    id: pos.id, dir: isBuy?'BUY':'SELL', entry: entryPrice, status: 'open', pnl: null,
+    tpPrice: pos.tpPrice, slPrice: pos.slPrice, lots: adjLots,
+    slDist: +slDist.toFixed(2), slAmount: +slAmount.toFixed(2), tpAmount: +tpAmount.toFixed(2),
+    quality, openTime: Date.now(), newsState: newsEngine.state,
+    dynSpread: 0, slip: 0, live: true, brokerPositionId,
+  };
+  demoTradeLog.unshift(logEntry);
+  updateLastTrade({...logEntry, entry:entryPrice});
+  updateDemoPositionsUI();
+  updateStatsStrip();
+}
+
+// ── LIVE POSITION SYNC — polls MetaApi for real closes/balance ──
+// Runs on an interval. For each locally-tracked live position that no longer
+// appears in the broker's open positions, it pulls the real closing deal(s)
+// to get the exact exit price/reason/profit, then reconciles the displayed
+// balance against the account's real balance (never hand-computed) so the
+// UI can't drift from what Exness actually shows.
+let _liveSyncBusy = false;
+async function syncLivePositions() {
+  if (!LiveBroker.enabled || !LiveBroker.configured() || _liveSyncBusy) return;
+  _liveSyncBusy = true;
+  try {
+    let info = null;
+    try { info = await LiveBroker.getAccountInformation(); LiveBroker.connectionStatus = info.connectionStatus || LiveBroker.connectionStatus; }
+    catch (e) { /* transient network/API errors shouldn't spam signals every 6s */ }
+
+    const liveOpen = demoPositions.filter(p => p.live);
+    if (liveOpen.length) {
+      let brokerPositions = [];
+      try { brokerPositions = await LiveBroker.getPositions(); }
+      catch (e) { addSignal('warn', `LIVE: position sync failed — ${e.message}`, null); brokerPositions = null; }
+
+      if (brokerPositions) {
+        const openIds = new Set(brokerPositions.map(p => String(p.id)));
+        for (const pos of liveOpen) {
+          if (openIds.has(String(pos.brokerPositionId))) continue; // still open on the broker
+
+          let exitPrice = pos.slPrice, pnl = 0, reason = 'CLOSED';
+          try {
+            const deals = await LiveBroker.getDealsByPosition(pos.brokerPositionId);
+            const closingDeals = (deals || []).filter(d => d.entryType === 'DEAL_ENTRY_OUT' || d.entryType === 'DEAL_ENTRY_OUT_BY');
+            if (closingDeals.length) {
+              pnl = closingDeals.reduce((s, d) => s + (d.profit || 0) + (d.commission || 0) + (d.swap || 0), 0);
+              const last = closingDeals[closingDeals.length - 1];
+              if (last.price) exitPrice = last.price;
+              if (last.reason) reason = String(last.reason).replace('DEAL_REASON_', '');
+              else reason = Math.abs(exitPrice - pos.tpPrice) < Math.abs(exitPrice - pos.slPrice)
+                ? 'TP' : ((pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL');
+            }
+          } catch (e) {
+            addSignal('warn', `LIVE: couldn't fetch close details for #${pos.id} — ${e.message}`, null);
+          }
+
+          demoPositions = demoPositions.filter(p => p.id !== pos.id);
+          sessionPnL += pnl;
+          checkProfitLock();
+          if (pnl > 0) { wins++; consecutiveWins++; consecutiveLosses = 0; if (riskHalved) { riskHalved = false; addSignal('info', 'Win — risk restored to normal', null); } }
+          else { losses++; consecutiveLosses++; consecutiveWins = 0; if (consecutiveLosses >= SAFETY.CONSEC_LOSS_HALVE) { riskHalved = true; addSignal('warn', `${consecutiveLosses}x consecutive losses — risk halved`, null); } }
+
+          const log = demoTradeLog.find(t => t.id === pos.id);
+          if (log) { log.status = reason; log.pnl = pnl; log.closeTime = Date.now(); log.trailPhase = pos.trailPhase || 0; Storage.saveTrade({ ...log, closedAt: Date.now() }); }
+
+          const dirLbl = pos.dir === 'UP' ? 'BUY' : 'SELL';
+          addSignal(pnl > 0 ? 'buy' : 'sell', `LIVE ${dirLbl} CLOSED [${reason}] PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} @ ${(+exitPrice).toFixed(2)} [Exness #${pos.brokerPositionId}]`, mid);
+          updateLastTrade({ id: pos.id, dir: dirLbl, entry: pos.entry, status: reason, pnl });
+          const sess = strategy.activeSession ? strategy.activeSession() : 'UNKNOWN';
+          if (sessionStats[sess]) { if (pnl > 0) sessionStats[sess].w++; else sessionStats[sess].l++; }
+        }
+        updateDemoPositionsUI();
+      }
+    }
+
+    if (info && Number.isFinite(+info.balance)) {
+      demoBalance = +info.balance;
+      if (!liveEquity.length) liveEquity = [demoStartBal || demoBalance];
+      liveEquity.push(+demoBalance.toFixed(2));
+      const _eq = Number.isFinite(+info.equity) ? +info.equity : demoBalance;
+      liveMaxBal = Math.max(liveMaxBal || _eq, _eq);
+      if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - _eq) / liveMaxBal) * 100);
+      updateStatsStrip();
+    }
+  } finally {
+    _liveSyncBusy = false;
+  }
+}
+setInterval(syncLivePositions, 6000);
 
 // Grade-based trail offset — applied equally to all three phase thresholds
 // so the ordering (P1 < P2 < P3) is always preserved. Weak (grade 1/C)
@@ -7237,10 +7513,20 @@ function checkDemoPositions() {
       pos.trailPhase = trail.phase;
     }
     if(trail.newSL !== pos.slPrice) {
-      pos.slPrice = trail.newSL;
+      const newSL = trail.newSL;
+      pos.slPrice = newSL;
       pos.slAmount = 0; // BE+ territory
       if(trail.trailInfo) {
         addSignal('info', `#${pos.id} ${pos.dir==='UP'?'BUY':'SELL'} ${trail.trailInfo} (${trail.pctToTP}% to TP)`, mid);
+      }
+      // LIVE: push the new stop to the real broker order. Fire-and-forget —
+      // if it fails we log it; the position keeps its broker-side SL from
+      // before this tick (safe, just less tight) until the next tick tries again.
+      if (pos.live && !pos.brokerSyncing) {
+        pos.brokerSyncing = true;
+        LiveBroker.modifyPosition(pos.brokerPositionId, newSL, pos.tpPrice)
+          .catch(e => addSignal('warn', `LIVE: SL update failed for #${pos.id} — ${e.message}`, null))
+          .finally(() => { pos.brokerSyncing = false; });
       }
     }
   });
@@ -7301,8 +7587,6 @@ function checkDemoPositions() {
     // real gains vs the actual balance. Log it as a separate closed trade. ──
     wins++; consecutiveWins++; consecutiveLosses = 0;
     if (riskHalved) { riskHalved = false; addSignal('info', `Win — risk restored to normal (${consecutiveWins}W streak)`, null); }
-    // Partial TP is a realized win for this setup profile — train on it too.
-    if (pos.mlFeat) WinModel.update(pos.mlFeat, true);
     demoTradeLog.unshift({
       id: pos.id + '_partial_' + Date.now(),
       dir: dirLbl, entry: pos.entry, status: 'PARTIAL', pnl: +partialPnL.toFixed(2),
@@ -7329,6 +7613,7 @@ function checkDemoPositions() {
   // Closes stagnant positions that have been open 20+ M1 bars (≥20 min) with no PnL.
   // Prevents capital being tied up in setups that have lost momentum.
   demoPositions.forEach(pos => {
+    if(pos.live) return; // broker enforces its own exits — see syncLivePositions()
     if(closeData.find(c => c.pos.id === pos.id)) return; // already queued
     const ageMs = Date.now() - (pos.openTime || Date.now());
     const ageBars = Math.floor(ageMs / 60000); // 1 bar = 1 minute (M1)
@@ -7353,6 +7638,7 @@ function checkDemoPositions() {
   // price reached it, so a trade could never actually run past its own
   // target even after Phase 3 activated.
   demoPositions.forEach(pos => {
+    if(pos.live) return; // broker enforces its own SL/TP — see syncLivePositions()
     if(closeData.find(c => c.pos.id === pos.id)) return; // already queued by TIME_EXIT
     const isBuy = pos.dir === 'UP';
     // Runner mode only suppresses the hard TP once the trailing SL is
@@ -7398,14 +7684,6 @@ function checkDemoPositions() {
       if(consecutiveLosses >= SAFETY.CONSEC_LOSS_HALVE) {
         riskHalved = true;
         addSignal('warn',`${consecutiveLosses}x consecutive losses — risk halved until next win`, null);
-      }
-    }
-    // Train the ML win-probability model on this actual outcome.
-    if (pos.mlFeat) {
-      WinModel.update(pos.mlFeat, pnl > 0);
-      if (WinModel.n % 20 === 0) {
-        addSignal('info',
-          `ML model: n=${WinModel.n} trades trained, live accuracy ${(WinModel.accuracy()*100).toFixed(0)}%${WinModel.n < CFG.MODEL_MIN_SAMPLES ? ' (observing — gate not active yet)' : ''}`, null);
       }
     }
     if(hardFloor > 0 && demoBalance <= hardFloor) {
@@ -7606,6 +7884,36 @@ function loadSettings() {
   if(CFG.DEMO_BALANCE > 0) resetHardFloor(CFG.DEMO_BALANCE);
   updateDepositNotice();
   updateStatsStrip();
+  LiveBroker.load();
+  $('cfgBrokerEnabled').checked  = LiveBroker.enabled;
+  $('cfgBrokerAccountId').value  = LiveBroker.accountId;
+  $('cfgBrokerToken').value      = LiveBroker.token;
+  $('cfgBrokerRegion').value     = LiveBroker.region || 'london';
+  $('cfgBrokerSymbol').value     = LiveBroker.symbol || 'BTCUSDz';
+  updateModeBadge();
+}
+
+async function testBrokerConnection() {
+  const statusEl = $('brokerStatus');
+  statusEl.textContent = 'Testing...'; statusEl.style.color = 'var(--text2)';
+  LiveBroker.accountId = $('cfgBrokerAccountId').value.trim();
+  LiveBroker.token     = $('cfgBrokerToken').value.trim();
+  LiveBroker.region    = $('cfgBrokerRegion').value;
+  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDz';
+  try {
+    const info = await LiveBroker.testConnection();
+    const ok = info.connectionStatus === 'CONNECTED';
+    statusEl.textContent = `${info.connectionStatus || info.state || '—'} · bal $${(+info.balance||0).toFixed(2)} · ${info.server||''} · ${info.login||''}`;
+    statusEl.style.color = ok ? 'var(--green)' : 'var(--gold)';
+    if (!ok) {
+      addSignal('warn', `MetaApi reachable but broker connectionStatus is ${info.connectionStatus} — live orders will fail until it shows CONNECTED. Check the MT5 login/password/server saved in the MetaApi dashboard.`, null);
+    } else {
+      addSignal('info', `MetaApi connected — balance $${(+info.balance||0).toFixed(2)}, equity $${(+info.equity||0).toFixed(2)}`, null);
+    }
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`; statusEl.style.color = 'var(--red)';
+    addSignal('warn', `MetaApi test failed: ${e.message}`, null);
+  }
 }
 
 function saveSettings() {
@@ -7668,6 +7976,13 @@ function saveSettings() {
     lockedProfit = 0; profitLockHits = 0; profitLockBaseline = newBal; profitLockDay = new Date().toDateString();
   }
   if(authed && !startBalance && balance) { startBalance = balance; CFG.START_BALANCE = balance; }
+  LiveBroker.enabled   = $('cfgBrokerEnabled').checked;
+  LiveBroker.accountId = $('cfgBrokerAccountId').value.trim();
+  LiveBroker.token     = $('cfgBrokerToken').value.trim();
+  LiveBroker.region    = $('cfgBrokerRegion').value;
+  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDz';
+  LiveBroker.save();
+  updateModeBadge();
   updateStatsStrip(); updateTargetBar(); updateDepositNotice();
   const saved=$('settingsSaved');
   saved.style.opacity='1';
@@ -8450,15 +8765,8 @@ const Storage = {
   db: null,
   init() {
     return new Promise((resolve, reject) => {
-      // Bumped 1 → 2 to add the 'model' store for WinModel's learned
-      // weights, so the ML gate's training carries over across reloads
-      // instead of restarting cold every session.
-      const req = indexedDB.open('PA_BOT_DB', 2);
-      req.onupgradeneeded = e => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains('trades')) db.createObjectStore('trades', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('model'))  db.createObjectStore('model',  { keyPath: 'id' });
-      };
+      const req = indexedDB.open('PA_BOT_DB', 1);
+      req.onupgradeneeded = e => { e.target.result.createObjectStore('trades', { keyPath: 'id' }); };
       req.onsuccess = () => { this.db = req.result; resolve(); };
       req.onerror = () => { addSignal('warn','IndexedDB failed — trade history will not persist',null); reject(); };
     });
@@ -8467,122 +8775,6 @@ const Storage = {
     if (!this.db) return;
     const tx = this.db.transaction('trades', 'readwrite');
     tx.objectStore('trades').put(trade);
-  },
-  saveModel(state) {
-    if (!this.db) return;
-    const tx = this.db.transaction('model', 'readwrite');
-    tx.objectStore('model').put(state);
-  },
-  loadModel() {
-    return new Promise((resolve) => {
-      if (!this.db) return resolve(null);
-      const tx = this.db.transaction('model', 'readonly');
-      const req = tx.objectStore('model').get('winmodel');
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
-  }
-};
-
-// ════════════════════════════════════════════════════════════
-//  ML WIN-PROBABILITY MODEL — online logistic regression
-// ════════════════════════════════════════════════════════════
-// The quality score is a hand-weighted pattern-conformity score — it was
-// never validated against this bot's actual outcomes. WinModel closes that
-// gap: it learns, from the bot's OWN closed trades, which feature profiles
-// actually went on to win, and produces a calibrated win probability per
-// setup. It trains incrementally (one SGD step per closed trade) so it
-// keeps adapting as market conditions drift, and persists its weights to
-// IndexedDB so training isn't lost on reload.
-//
-// Feature set is a fixed-width union of every quality-component name used
-// across both signal pipelines (Strategy 1's simple breakout components AND
-// the ICT-style components), plus a few context features (planned RR,
-// spread-as-fraction-of-SL, direction, volatility regime). Whichever
-// pipeline fired, only the components it actually produced are non-zero —
-// the rest default to 0 — so a single fixed-length weight vector covers
-// both.
-const ML_FEATURES = [
-  'bias', 'scoreTotal',
-  'comp_breakout', 'comp_trend', 'comp_regime', 'comp_room', 'comp_wickPenalty',
-  'comp_liquidity', 'comp_structure', 'comp_orderBlock', 'comp_fvg', 'comp_retracement', 'comp_sequence',
-  'counterTrend', 'rr', 'spreadCostRatio', 'volRegime', 'isBuy'
-];
-
-const WinModel = {
-  weights: new Array(ML_FEATURES.length).fill(0),
-  n: 0,        // trades trained on so far
-  correct: 0,  // running (predicted>0.5 === actual) tally, for a rough live accuracy readout
-  lr: 0.08,    // SGD learning rate
-  l2: 0.001,   // small L2 penalty so weights don't run away on a short, noisy history
-
-  _sigmoid(z) { return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z)))); },
-
-  // Pulls whatever quality.components the firing setup produced, normalizes
-  // each to roughly 0–1, and fills in context features. Missing components
-  // (the other pipeline's fields) stay 0 rather than erroring.
-  extractFeatures(rawSetup, ctx) {
-    const comp = (rawSetup && rawSetup.quality && rawSetup.quality.components) || {};
-    const f = {};
-    ML_FEATURES.forEach(k => f[k] = 0);
-    f.bias             = 1;
-    f.scoreTotal        = (ctx.qualityScore || 0) / 100;
-    f.comp_breakout     = (comp.breakout    || 0) / 40;
-    f.comp_trend        = (comp.trend       || 0) / 40;
-    f.comp_regime       = (comp.regime      || 0) / 40;
-    f.comp_room         = (comp.room        || 0) / 40;
-    f.comp_wickPenalty  = (comp.wickPenalty || 0) / 20;
-    f.comp_liquidity    = (comp.liquidity   || 0) / 20;
-    f.comp_structure    = (comp.structure   || 0) / 20;
-    f.comp_orderBlock   = (comp.orderBlock  || 0) / 20;
-    f.comp_fvg          = (comp.fvg         || 0) / 15;
-    f.comp_retracement  = (comp.retracement || 0) / 20;
-    f.comp_sequence     = (comp.sequence    || 0) / 10;
-    f.counterTrend      = (rawSetup && rawSetup.counterTrend) ? 1 : 0;
-    f.rr                = Math.min(3, ctx.rr || 1);
-    f.spreadCostRatio   = ctx.slDist ? Math.min(1, (ctx.spread || 0) / ctx.slDist) : 0;
-    f.volRegime         = Math.min(2, ctx.atr ? ctx.atr / 150 : 1);
-    f.isBuy             = ctx.isBuy ? 1 : 0;
-    return f;
-  },
-
-  vector(f) { return ML_FEATURES.map(k => f[k] || 0); },
-
-  predict(f) {
-    const v = this.vector(f);
-    let z = 0;
-    for (let i = 0; i < v.length; i++) z += v[i] * this.weights[i];
-    return this._sigmoid(z);
-  },
-
-  // One online SGD step. Call once per closed trade with the feature map
-  // captured at entry and whether it ultimately won.
-  update(f, won) {
-    const v = this.vector(f);
-    const p = this.predict(f);
-    const y = won ? 1 : 0;
-    if ((p > 0.5) === (y === 1)) this.correct++;
-    this.n++;
-    for (let i = 0; i < v.length; i++) {
-      const grad = (p - y) * v[i] + this.l2 * this.weights[i];
-      this.weights[i] -= this.lr * grad;
-    }
-    this._persist();
-  },
-
-  accuracy() { return this.n ? this.correct / this.n : null; },
-
-  _persist() {
-    Storage.saveModel({ id: 'winmodel', weights: this.weights, n: this.n, correct: this.correct });
-  },
-
-  async load() {
-    const saved = await Storage.loadModel();
-    if (saved) {
-      this.weights = saved.weights && saved.weights.length === ML_FEATURES.length ? saved.weights : this.weights;
-      this.n = saved.n || 0;
-      this.correct = saved.correct || 0;
-    }
   }
 };
 
@@ -10678,6 +10870,7 @@ function _scanGapPositions() {
 
   const closeData = [];
   demoPositions.forEach(pos => {
+    if (pos.live) return; // broker keeps enforcing SL/TP server-side even while the tab is hidden
     if (closeData.find(c => c.pos.id === pos.id)) return; // already closing
     const isBuy = pos.dir === 'UP';
     // BUG FIX: this used to check each gap bar's raw high/low against a
@@ -10767,7 +10960,6 @@ function _scanGapPositions() {
         addSignal('warn', `${consecutiveLosses}x consecutive losses — risk halved`, null);
       }
     }
-    if (pos.mlFeat) WinModel.update(pos.mlFeat, pnl > 0);
     if (hardFloor > 0 && demoBalance <= hardFloor) {
       addSignal('warn', `[REPORT] HARD FLOOR REACHED — balance $${demoBalance.toFixed(2)}. Trading continues.`, null);
     }
@@ -10804,7 +10996,7 @@ resizeCV();
 loadSettings();
 updateProfitLockUI();
 setBtToday();
-Storage.init().then(() => WinModel.load()).catch(() => {});
+Storage.init().catch(() => {});
 bootApp();
 setInterval(drawChart, 1000);
 setInterval(updateStatsStrip, 3000);
