@@ -9030,20 +9030,119 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDrawer(); })
 // ── STORAGE ──
 const Storage = {
   db: null,
+  DB_VERSION: 2,
+  _initPromise: null,
   init() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open('PA_BOT_DB', 1);
-      req.onupgradeneeded = e => { e.target.result.createObjectStore('trades', { keyPath: 'id' }); };
+    if (this._initPromise) return this._initPromise;
+    this._initPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open('PA_BOT_DB', this.DB_VERSION);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('trades')) db.createObjectStore('trades', { keyPath: 'id' });
+        // Local cache of fetched backtest candles, keyed by "<granularity>:<zero-padded
+        // epoch>" so an IDBKeyRange.bound range query sorts the same as numeric epoch
+        // order. Lets repeat/overlapping backtests skip re-downloading history they
+        // already have — the actual bottleneck for a multi-year fetch isn't CPU, it's
+        // the exchange's own rate limit, so caching is the only way to make a repeat
+        // run fast without hammering that limit.
+        if (!db.objectStoreNames.contains('candles')) db.createObjectStore('candles', { keyPath: 'k' });
+        // Tracks which [start,end] epoch ranges are FULLY cached per granularity, so a
+        // new request only needs to fetch the gaps not yet covered.
+        if (!db.objectStoreNames.contains('candleCoverage')) db.createObjectStore('candleCoverage', { keyPath: 'granularity' });
+      };
       req.onsuccess = () => { this.db = req.result; resolve(); };
-      req.onerror = () => { addSignal('warn','IndexedDB failed — trade history will not persist',null); reject(); };
+      req.onerror = () => { addSignal('warn','IndexedDB failed — trade history and candle cache will not persist',null); reject(req.error); };
     });
+    return this._initPromise;
+  },
+  async _ready() {
+    if (this.db) return true;
+    try { await this.init(); } catch (e) { return false; }
+    return !!this.db;
   },
   saveTrade(trade) {
     if (!this.db) return;
     const tx = this.db.transaction('trades', 'readwrite');
     tx.objectStore('trades').put(trade);
-  }
+  },
+
+  // ── Candle cache ──
+  _padEpoch(e) { return String(e).padStart(12, '0'); },
+  async getCandleCoverage(granularity) {
+    if (!(await this._ready())) return [];
+    return new Promise(resolve => {
+      const tx = this.db.transaction('candleCoverage', 'readonly');
+      const req = tx.objectStore('candleCoverage').get(granularity);
+      req.onsuccess = () => resolve((req.result && req.result.ranges) || []);
+      req.onerror = () => resolve([]);
+    });
+  },
+  async setCandleCoverage(granularity, ranges) {
+    if (!(await this._ready())) return;
+    return new Promise(resolve => {
+      const tx = this.db.transaction('candleCoverage', 'readwrite');
+      tx.objectStore('candleCoverage').put({ granularity, ranges });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  },
+  async putCandles(granularity, candleArr) {
+    if (!candleArr.length || !(await this._ready())) return;
+    return new Promise(resolve => {
+      const tx = this.db.transaction('candles', 'readwrite');
+      const store = tx.objectStore('candles');
+      for (const c of candleArr) {
+        store.put({ k: `${granularity}:${this._padEpoch(c.epoch)}`, epoch: c.epoch, low: c.low, high: c.high, open: c.open, close: c.close });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  },
+  async getCandlesInRange(granularity, startEpoch, endEpoch) {
+    if (!(await this._ready())) return [];
+    return new Promise(resolve => {
+      const tx = this.db.transaction('candles', 'readonly');
+      const range = IDBKeyRange.bound(`${granularity}:${this._padEpoch(startEpoch)}`, `${granularity}:${this._padEpoch(endEpoch)}`);
+      const req = tx.objectStore('candles').openCursor(range);
+      const out = [];
+      req.onsuccess = e => {
+        const cursor = e.target.result;
+        if (cursor) { out.push({ epoch: cursor.value.epoch, low: cursor.value.low, high: cursor.value.high, open: cursor.value.open, close: cursor.value.close }); cursor.continue(); }
+        else resolve(out);
+      };
+      req.onerror = () => resolve(out);
+    });
+  },
 };
+
+// Interval helpers for the candle cache's coverage tracking — pure functions,
+// no IndexedDB access, so they're trivial to reason about independently.
+function _rangesSubtract(reqStart, reqEnd, covered) {
+  const sorted = [...covered].sort((a, b) => a.start - b.start);
+  const gaps = [];
+  let cursor = reqStart;
+  for (const r of sorted) {
+    if (r.end < cursor) continue;
+    if (r.start > reqEnd) break;
+    if (r.start > cursor) gaps.push({ start: cursor, end: Math.min(r.start - 1, reqEnd) });
+    cursor = Math.max(cursor, r.end + 1);
+    if (cursor > reqEnd) break;
+  }
+  if (cursor <= reqEnd) gaps.push({ start: cursor, end: reqEnd });
+  return gaps;
+}
+function _rangesMerge(covered, addRange) {
+  const all = [...covered, addRange].sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const r of all) {
+    if (merged.length && r.start <= merged[merged.length - 1].end + 1) {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  return merged;
+}
 
 // ════════════════════════════════════════════════════════════
 //  VISUAL BAR REPLAY ENGINE
@@ -10524,17 +10623,15 @@ async function _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress
   return { candles: collected, oldestCovered: collected.length ? collected[0].epoch : endEpoch };
 }
 
-async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
+async function _fetchBtRangeFromBroker(granularity, startEpoch, endEpoch, onProgress) {
   if (LiveBroker.configured() && EXNESS_BT_TF_MAP[granularity]) {
     addSignal('info', 'BT: fetching history from Exness (MetaApi) first...', null);
-    btFetching = true;
     let exOut = null;
     try {
       exOut = await _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress);
     } catch (e) {
       addSignal('warn', `Exness BT history failed: ${e.message} — using Coinbase for the full range`, null);
     }
-    btFetching = false;
 
     if (btCancelled) return exOut ? exOut.candles : [];
 
@@ -10562,6 +10659,64 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   return _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProgress);
 }
 
+// ── TOP-LEVEL BACKTEST FETCH — cache-first ──────────────────────────────────
+// A 5-year M1 backtest is ~2.6M bars; at Coinbase's public-API rate limit
+// (a few requests/sec, 300 bars/page — the exchange enforces this, it isn't
+// a knob this app controls) a full fetch of that size realistically takes
+// on the order of 10-20 minutes, not seconds — no page-cap or concurrency
+// tweak gets around that ceiling without risking a 429 ban. What this DOES
+// make fast is every run *after* the first: candles are cached locally
+// (IndexedDB) with their covered epoch ranges tracked, so a second backtest
+// over the same — or an overlapping — date range only fetches whatever
+// portion isn't already cached, which for most iteration (tweaking a
+// strategy param and re-running) is nothing at all.
+async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
+  btFetching = true;
+  try {
+    const totalBars = Math.max(1, Math.ceil((endEpoch - startEpoch) / granularity) + 1);
+    let covered = [];
+    try { covered = await Storage.getCandleCoverage(granularity); } catch (e) {}
+    const gaps = _rangesSubtract(startEpoch, endEpoch, covered);
+
+    if (!gaps.length) {
+      addSignal('info', 'BT data: entire range already cached locally — no network fetch needed', null);
+      if (onProgress) onProgress(1, 1);
+      return await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+    }
+
+    const gapBars = gaps.reduce((s, g) => s + Math.max(1, Math.ceil((g.end - g.start) / granularity)), 0);
+    const cachedBars = Math.max(0, totalBars - gapBars);
+    if (cachedBars > 0) {
+      addSignal('info', `BT data: ${cachedBars.toLocaleString()} of ${totalBars.toLocaleString()} bars already cached locally — fetching only the missing ${gapBars.toLocaleString()}`, null);
+    }
+
+    let doneBarsBeforeCurrentGap = 0;
+    for (const gap of gaps) {
+      if (btCancelled) break;
+      const gapExpected = Math.max(1, Math.ceil((gap.end - gap.start) / granularity));
+      const bars = await _fetchBtRangeFromBroker(granularity, gap.start, gap.end, (completed, total) => {
+        const scaled = total > 0 ? (completed / total) * gapExpected : 0;
+        if (onProgress) onProgress(Math.min(totalBars, cachedBars + doneBarsBeforeCurrentGap + scaled), totalBars);
+      });
+      if (bars && bars.length) {
+        try {
+          await Storage.putCandles(granularity, bars);
+          if (!btCancelled) {
+            const newCoverage = _rangesMerge(await Storage.getCandleCoverage(granularity), { start: gap.start, end: gap.end });
+            await Storage.setCandleCoverage(granularity, newCoverage);
+          }
+        } catch (e) {}
+      }
+      doneBarsBeforeCurrentGap += gapExpected;
+    }
+
+    if (onProgress) onProgress(totalBars, totalBars);
+    return await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+  } finally {
+    btFetching = false;
+  }
+}
+
 async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   // Fetches historical OHLC candles from Coinbase Exchange's public REST
   // /candles endpoint for backtest.
@@ -10581,7 +10736,7 @@ async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProg
   const MAX_PAGES = 6000; // ~6000 × 300 M1 bars ≈ 3.4yrs — plenty of headroom for a multi-year backtest
   if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
-  const CONCURRENCY = 6; // comfortably under Coinbase's public rate limit
+  const CONCURRENCY = 8; // pushed up from 6 — still under Coinbase's public burst limit; higher just trades faster failures for more 429s
   const results = new Array(pageStarts.length);
   let completedPages = 0;
   btFetching = true;
@@ -10592,8 +10747,8 @@ async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProg
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-      reject(new Error('Coinbase request timed out after 15s'));
-    }, 15000);
+      reject(new Error('Coinbase request timed out after 10s'));
+    }, 10000);
     const pageEndSec = Math.min(pageStartSec + pageSpanSec - granularity, endEpoch);
     const startIso = new Date(pageStartSec * 1000).toISOString();
     const endIso   = new Date(pageEndSec * 1000).toISOString();
