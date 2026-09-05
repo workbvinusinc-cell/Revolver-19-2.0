@@ -993,7 +993,7 @@ input[type=range]::-webkit-slider-thumb{
           <span>Live Trading</span>
           <input type="checkbox" id="cfgBrokerEnabled"/>
         </label>
-        <div class="field-hint" style="color:var(--red)">When ON, every signal sends a real market order to your Exness account via MetaApi, with real SL/TP. Run Test Connection first — it must show CONNECTED.</div>
+        <div class="field-hint" style="color:var(--red)">When ON: (1) every signal sends a real market order to Exness via MetaApi with real SL/TP, and (2) the price feed & candles switch from Coinbase to Exness's own live quotes for BTCUSDz. Run Test Connection first — it must show CONNECTED.</div>
       </div>
       <div class="field">
         <label>MetaApi Account ID</label>
@@ -1513,15 +1513,31 @@ const LiveBroker = {
   connectionStatus: 'UNKNOWN',
 
   baseUrl() { return `https://mt-client-api-v1.${this.region}.agiliumtrade.ai`; },
+  // Historical candles/ticks are served from a SEPARATE MetaApi hostname
+  // (mt-market-data-client-api-v1, not mt-client-api-v1) — hitting the
+  // regular client-api host for historical-market-data 404s. See
+  // https://metaapi.cloud/docs/client/restApi/api/retrieveMarketData/readHistoricalCandles/
+  historyBaseUrl() { return `https://mt-market-data-client-api-v1.${this.region}.agiliumtrade.ai`; },
   headers() { return { 'auth-token': this.token, 'Content-Type': 'application/json' }; },
   configured() { return !!(this.accountId && this.token && this.region); },
 
-  async _req(path, opts = {}) {
+  async _reqTo(base, path, opts = {}, timeoutMs = 20000) {
     if (!this.configured()) throw new Error('Broker not configured — set Account ID / Token / Region in Settings');
-    const res = await fetch(`${this.baseUrl()}${path}`, {
-      ...opts,
-      headers: { ...this.headers(), ...(opts.headers || {}) },
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(`${base}${path}`, {
+        ...opts,
+        signal: controller.signal,
+        headers: { ...this.headers(), ...(opts.headers || {}) },
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error(`Request timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     const text = await res.text();
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
@@ -1531,6 +1547,7 @@ const LiveBroker = {
     }
     return data;
   },
+  async _req(path, opts = {}) { return this._reqTo(this.baseUrl(), path, opts); },
 
   async getAccountInformation() {
     return this._req(`/users/current/accounts/${this.accountId}/account-information`);
@@ -1540,6 +1557,20 @@ const LiveBroker = {
   },
   async getDealsByPosition(positionId) {
     return this._req(`/users/current/accounts/${this.accountId}/history-deals/position/${positionId}`);
+  },
+  async getCurrentPrice() {
+    return this._req(`/users/current/accounts/${this.accountId}/symbols/${this.symbol}/current-price`);
+  },
+  async getHistoricalCandles(timeframe, limit, startTime) {
+    // MetaApi loads candles BACKWARD from startTime (or the latest candles if
+    // startTime is omitted). limit is capped at 1000 by MetaApi itself.
+    const qs = new URLSearchParams({ limit: String(Math.min(limit || 1000, 1000)) });
+    if (startTime) qs.set('startTime', startTime);
+    return this._reqTo(
+      this.historyBaseUrl(),
+      `/users/current/accounts/${this.accountId}/historical-market-data/symbols/${this.symbol}/timeframes/${timeframe}/candles?${qs.toString()}`,
+      {}, 60000 // this endpoint can be slow — MetaApi docs warn it may take up to 4min server-side; give it more room than the default 20s
+    );
   },
   async testConnection() {
     const info = await this.getAccountInformation();
@@ -1604,7 +1635,7 @@ const CFG = {
   // before a normal pullback reaches the stop — this is the single biggest
   // lever for flipping win-rate above 50%, since breakeven-required win rate
   // drops from 25% (@3R) to ~36% (@1.8R) while realistic hit rates go up too.
-  RR           : 1.8,
+  RR           : 1.55,
   START_BALANCE: 0,
   PROFIT_TARGET: 0,
   // ── Profit Lock ──
@@ -1628,7 +1659,7 @@ const CFG = {
                                // setting; Exness can drop this to 1:200/0.5% under High Margin Requirement)
   MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
-  MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
+  MAX_CONCURRENT_POS: 2,      // was 5 (orig 2) — tightened to keep the bot conservative with multiple positions open
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
   // boosted risk). Since this bot only trades BTCUSD, concurrent positions
   // are highly correlated — this stops the per-trade quality size bonus from
@@ -1644,10 +1675,10 @@ const CFG = {
   // paid out a full SL loss instead of scratching at breakeven — directly
   // inflating both the SL-hit count and drawdown the bot is trying to cut.
   // 52% still requires a real, non-noise move in favor before locking BE.
-  TRAIL_PHASE_1: 52,          // % to TP for BE lock
-  TRAIL_PHASE_2: 74,          // % to TP for 40% trail
-  TRAIL_PHASE_3: 90,          // % to TP for 60% runner trail
-  TRAIL_DIST   : 2.0,         // Min trail distance in $ — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
+  TRAIL_PHASE_1: 58,          // % to TP for BE lock (was 52 — requires a stronger, less noise-prone move before locking BE)
+  TRAIL_PHASE_2: 78,          // % to TP for 40% trail (was 74)
+  TRAIL_PHASE_3: 92,          // % to TP for 60% runner trail (was 90)
+  TRAIL_DIST   : 3.0,         // Min trail distance in $ (was 2.0) — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
   // ── Blow-Proof Safety Layer Settings (user-configurable) ──
   SAFETY_HARD_FLOOR_PCT   : 10,   // % of start balance = hard floor
   SAFETY_MAX_RISK_CAP_PCT : 5,    // % hard cap on risk per trade
@@ -2409,17 +2440,19 @@ const REFINED_STRATEGY_CFG = {
     // of the day's genuine breakouts through the trigger stage; the
     // quality score below (not this trigger) is now the primary filter
     // for whether a triggered setup is actually good.
-    lookbackBars: 6,
-    // Dialed back from 0.35 — that required a near-maximum-conviction
-    // candle to trigger at all, which is rarer than it needs to be. 0.28
-    // still rules out doji/indecision candles but doesn't demand an
-    // outlier bar just to get evaluated.
-    minBodyRatio: 0.28,
-    useTrendFilter: true,   // was false — re-enabled: trading with the M5 trend is the single biggest lever
+    lookbackBars: 10,        // was 6 — a wider range breakout is a stronger, less noise-prone signal
+    // Raised from 0.28 — 0.32 still isn't a demand for an outlier bar, but
+    // requires a genuinely convicted breakout candle rather than one that
+    // barely clears the doji/indecision floor.
+    minBodyRatio: 0.32,
+    useTrendFilter: true,   // re-enabled: trading with the M5 trend is the single biggest lever
                              // for setups that "almost win" rather than firing into a countertrend fade.
-                             // NOTE: this is a SOFT filter (see evaluate() below) — it does not block
-                             // counter-trend setups outright, it just requires them to clear a higher
-                             // quality bar (B+/A/A+) than a with-trend setup would.
+                             // HARD FILTER: when allowCounterTrend is false (default), counter-trend
+                             // setups are rejected outright below — they are never merely scored down.
+    allowCounterTrend: false, // HARD block on countertrend Strategy 1 trades when the HTF trend filter
+                               // is active — see the hard reject in evaluate() below.
+    minBreakoutATR: 0.05,    // reject a breakout whose overshoot past the range edge is too small to be real
+    maxChaseATR: 0.65,       // reject a breakout that has already run too far past the range edge (chasing)
     // Note: the SL ATR cushion still comes from trade.slBufferATR below — unchanged.
 
     // ---- quality upgrades (cheap filters that cut weak trades without reintroducing the old 5-gate chain) ----
@@ -2437,7 +2470,11 @@ const REFINED_STRATEGY_CFG = {
     // frequency. Eased slightly from 0.5 → 0.4 ATR: still rejects "buying
     // right into the wall" setups, just no longer requires an unusually
     // clear runway on top of that.
-    minRoomATR: 0.4
+    // Eased slightly further, 0.4 → 0.30, now that the breakout trigger
+    // itself (lookbackBars/minBodyRatio) and the new overshoot/failed-break
+    // checks below are doing more of the false-entry filtering, so room-to-
+    // run no longer needs to carry as much of that burden alone.
+    minRoomATR: 0.30
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -2522,9 +2559,9 @@ const REFINED_STRATEGY_CFG = {
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    plusScore: 77,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 84,    // A  floor — the entry gate for COUNTER-trend setups
-    eliteScore: 97,       // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+    plusScore: 80,        // B+ floor (was 77) — the actual entry gate for trend-aligned setups
+    premiumScore: 88,    // A  floor (was 84) — the entry gate for COUNTER-trend setups
+    eliteScore: 96,       // A+ floor (was 97) — top tier, gets the longest RR via gradeRRContinuous()
 
     weights: {
       liquidity: 20,
@@ -2554,7 +2591,7 @@ const REFINED_STRATEGY_CFG = {
 
   // ---------- Trade geometry ----------
   trade: {
-    rr: 1.8,   // kept in sync with CFG.RR — see comment there
+    rr: 1.55,   // kept in sync with CFG.RR — see comment there
 
     // "SWEEP", "OB", "STRUCTURE", or "HYBRID"
     slReference: "HYBRID",
@@ -2566,7 +2603,7 @@ const REFINED_STRATEGY_CFG = {
     // Widened from 0.20 — still small next to the wider lookbackBars-based
     // stop above, but gives a plain wick-retest of the level a bit more
     // room before it counts as invalidation.
-    slBufferATR: 0.35,
+    slBufferATR: 0.25,  // was 0.35 — tightened alongside the new overshoot/failed-break checks below
 
     // BUG FIX — the root cause of the bot's low win rate: this was a flat
     // $6 cap on SL distance. That number makes sense for a much
@@ -3638,6 +3675,21 @@ const RefinedStrategy = (() => {
     const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
     const counterTrend = trend !== "NONE" && ((isBuy && trend === "BEAR") || (!isBuy && trend === "BULL"));
 
+    // ── HARD TREND FILTER ── when the HTF trend filter is active and this
+    // setup runs against it, reject it outright rather than merely scoring
+    // it down. Counter-trend Strategy 1 trades are never allowed through,
+    // full stop — the bot only trades with the dominant trend.
+    if (C.simple.useTrendFilter && C.simple.allowCounterTrend === false && counterTrend) {
+      return {
+        signal: false,
+        reason: "COUNTERTREND_BLOCKED",
+        direction,
+        trend,
+        quality: null,
+        gates: { trigger: false, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
+
     // Exclude the still-forming candle — only trigger off a closed bar.
     const completed = m1.slice(0, -1);
     const last = completed[completed.length - 1];
@@ -3677,6 +3729,42 @@ const RefinedStrategy = (() => {
     }
 
     const currentATR = atr(completed, 14) || barRange;
+
+    // ── BREAKOUT OVERSHOOT PROTECTION — measure how far the breakout candle
+    // closed past the range edge it broke, in ATR terms. Too little and the
+    // breakout is too weak to trust; too much and price has already run so
+    // far that entering now means chasing an extended move. ──
+    const breakoutOvershoot = isBuy ? (last.close - recentHigh) : (recentLow - last.close);
+    const breakoutOvershootATR = currentATR > 0 ? breakoutOvershoot / currentATR : 0;
+    if (breakoutOvershootATR < C.simple.minBreakoutATR) {
+      return {
+        signal: false, reason: "BREAKOUT_TOO_WEAK", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
+    if (breakoutOvershootATR > C.simple.maxChaseATR) {
+      return {
+        signal: false, reason: "BREAKOUT_OVEREXTENDED_CHASE", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
+
+    // ── FAILED-BREAK PROTECTION — confirm price hasn't already fallen back
+    // through the breakout area since the candle closed (a false breakout /
+    // liquidity grab that immediately reverses). Uses the live tick price
+    // passed into evaluate(), not just the closed candle. ──
+    if (isBuy && price < last.close - currentATR * 0.15) {
+      return {
+        signal: false, reason: "FAILED_BREAK_REVERSAL", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
+    if (!isBuy && price > last.close + currentATR * 0.15) {
+      return {
+        signal: false, reason: "FAILED_BREAK_REVERSAL", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
 
     // ── Regime filter — skip only genuinely dead/no-volatility conditions,
     // where a "breakout" is really just spread/noise wiggling across a flat
@@ -4652,20 +4740,21 @@ const EMA_PULLBACK_CFG = {
   // EMA9 must lead EMA21 by at least this many ATR for a trend to count —
   // keeps the filter from firing on a flat chop where the two EMAs are
   // basically stacked on top of each other with no real separation.
-  // Eased 0.12 → 0.10 so a trend counts a little earlier, without opening
-  // it up to a genuinely flat/choppy tape.
-  trendSeparationATR: 0.10,
+  // Tightened 0.10 → 0.08 — requires a slightly more genuine EMA9/21
+  // separation before a trend counts, cutting down flat-chop false trends.
+  trendSeparationATR: 0.08,
 
   // How close the pullback candle's low (BUY) / high (SELL) must come to
-  // EMA9 to count as an actual "touch" of the fast average. Widened
-  // 0.55 → 0.65 ATR — this was rejecting valid pullbacks that touched
-  // slightly wide of EMA9 on a fast-moving M1 tape, which is exactly the
-  // setup this strategy exists to catch.
-  pullbackToleranceATR: 0.65,
+  // EMA9 to count as an actual "touch" of the fast average. Tightened
+  // 0.65 → 0.45 ATR — 0.65 was letting candles that had already travelled
+  // well past the EMA still count as a "touch"; 0.45 keeps the zone
+  // realistic while the two-sided intersection check below (rather than a
+  // one-sided test) does the rest of the work of confirming a genuine touch.
+  pullbackToleranceATR: 0.45,
 
   // Reclaim candle needs a real body — not a doji stalling at the EMA.
-  // Eased 0.30 → 0.25, in line with Strategy 1's body-ratio easing.
-  minBodyRatio: 0.25,
+  // Raised 0.25 → 0.30, in line with Strategy 1's body-ratio tightening.
+  minBodyRatio: 0.30,
 
   swingLookback: 10,      // bars back to find the structural SL reference
   slBufferATR: 0.30,
@@ -4686,7 +4775,7 @@ const EMA_PULLBACK_CFG = {
     // let 1-star and 2-star trades fire. This is now the same bar
     // (premiumScore-equivalent) Strategy 1 was just raised to, so no
     // strategy takes a sub-3-star trade.
-    minimumScore: 85,   // approval floor — below this the setup is skipped
+    minimumScore: 78,   // approval floor (was 85) — below this the setup is skipped
     weights: { trend: 30, body: 22, precision: 18, room: 15, regime: 15 }
   }
 };
@@ -4786,17 +4875,19 @@ const PullbackStrategy = (() => {
 
     // ── Pullback + reclaim trigger ──
     const bodyRatio = range(last) > 0 ? Math.abs(last.close - last.open) / range(last) : 0;
+    // FIXED — this used to be a one-sided test (only checking that the low
+    // (BUY) / high (SELL) wasn't too far past the EMA), which meant a candle
+    // that had travelled FAR beyond the EMA on the other side still counted
+    // as a "touch" as long as it didn't overshoot on the near side. Now
+    // requires genuine two-sided intersection between the candle's range and
+    // the EMA tolerance zone — the candle must actually straddle/touch the
+    // zone, not just end up somewhere past it.
+    const emaTol = C.pullbackToleranceATR * currentATR;
     const touchedEMA = isBuy
-      ? (last.low - fast) <= C.pullbackToleranceATR * currentATR
-      : (fast - last.high) <= C.pullbackToleranceATR * currentATR;
+      ? (last.low <= fast + emaTol) && (last.high >= fast - emaTol)
+      : (last.high >= fast - emaTol) && (last.low <= fast + emaTol);
     const reclaimed = isBuy ? (last.close > fast && last.close > last.open) : (last.close < fast && last.close < last.open);
 
-    // NOTE: no separate "overextension" distance check against EMA21 here —
-    // touchedEMA above already requires the pullback to have reached EMA9,
-    // so a reclaim off that touch is by definition not extended. Adding a
-    // second distance gate on top of that was redundant and, on a sustained
-    // trend (where EMA21 naturally lags price by several ATR), it rejected
-    // perfectly good pullbacks for no real quality reason.
     const triggered = touchedEMA && reclaimed && bodyRatio >= C.minBodyRatio;
 
     if (!triggered) {
@@ -4935,14 +5026,14 @@ const RANGE_BOUNCE_CFG = {
   maxRangeATR: 14,
 
   // How close the trigger candle's wick must reach to the channel edge to
-  // count as an actual sweep of that level. Eased slightly (0.35 → 0.40)
-  // to count near-edge wicks, not just ones that reach exactly to it.
-  edgeToleranceATR: 0.40,
+  // count as an actual sweep of that level. Tightened 0.40 → 0.28 so the
+  // strategy only fires on candles genuinely at the edge, not ones that
+  // merely got somewhat close to it.
+  edgeToleranceATR: 0.28,
   // Rejection wick needs to be a meaningful fraction of the candle's total
   // range — a small poke-through with no real rejection isn't a signal.
-  // Eased 0.45 → 0.40, still requires the wick to be the dominant feature
-  // of the candle, just not an outlier one.
-  wickRejectionRatio: 0.40,
+  // Raised 0.40 → 0.42, requiring the wick to be even more dominant.
+  wickRejectionRatio: 0.42,
   // How far back inside the channel the close must land, past the edge.
   reclaimBufferATR: 0.15,
 
@@ -4962,7 +5053,7 @@ const RANGE_BOUNCE_CFG = {
     // Raised to the 3-star floor — rangeBounceScoreToLegacyGrade() maps
     // score>=85 to legacyGrade 3 (★★★); matches Strategy 1 & 2's gate so
     // no strategy ever takes a 1-star or 2-star trade.
-    minimumScore: 85,
+    minimumScore: 82,   // was 85
     weights: { depth: 20, wick: 30, precision: 20, room: 15, regime: 15 }
   }
 };
@@ -5058,9 +5149,15 @@ const RangeBounceStrategy = (() => {
     const lowerWick = bodyBot - last.low;
     const upperWick = last.high - bodyTop;
 
+    // FIXED — this was a one-sided test (only bounding how far the wick sat
+    // ABOVE/inside the edge), so a candle whose wick had travelled far
+    // outside the range entirely still counted as a "sweep." Now bounded on
+    // both sides: the wick must sit near the edge, not deep inside it and
+    // not wildly beyond it either.
+    const edgeTol = C.edgeToleranceATR * currentATR;
     const sweptEdge = isBuy
-      ? (last.low - rangeLow) <= C.edgeToleranceATR * currentATR
-      : (rangeHigh - last.high) <= C.edgeToleranceATR * currentATR;
+      ? (last.low <= rangeLow + edgeTol) && (last.low >= rangeLow - edgeTol * 1.5)
+      : (last.high >= rangeHigh - edgeTol) && (last.high <= rangeHigh + edgeTol * 1.5);
     const wickRatio = candleRange > 0 ? (isBuy ? lowerWick : upperWick) / candleRange : 0;
     const rejected = wickRatio >= C.wickRejectionRatio;
     const reclaimed = isBuy
@@ -5080,6 +5177,15 @@ const RangeBounceStrategy = (() => {
         gates: { rangeShape: true, trigger: true, regimeOk: false, newsOk: false } };
     }
 
+    // ── HARD RANGE-ONLY GATE — Strategy 3 is a genuine range strategy: it
+    // must not fire outside an actual RANGE regime. Previously this only
+    // scored the regime down (trendPenaltyRegime); now a non-RANGE regime
+    // is rejected outright. ──
+    if (regime !== "RANGE") {
+      return { signal: false, reason: "NOT_RANGE_REGIME", direction, rangeSizeATR, quality: null,
+        gates: { rangeShape: true, trigger: true, regimeOk: false, newsOk: false } };
+    }
+
     // ── News blackout (shared with Strategy 1 & 2) ──
     if (C.avoidNewsRelease && typeof newsEngine !== "undefined" && newsEngine.state === "PRE_RELEASE") {
       return { signal: false, reason: "NEWS_RELEASE_WINDOW", direction, rangeSizeATR, quality: null,
@@ -5094,7 +5200,10 @@ const RangeBounceStrategy = (() => {
     const precisionScore = clamp(1 - (edgeDist / (C.edgeToleranceATR * currentATR || 1)), 0, 1) * w.precision;
     const roomToOpposite = isBuy ? (rangeHigh - last.close) : (last.close - rangeLow);
     const roomScore = clamp((roomToOpposite / currentATR) / 2.5, 0, 1) * w.room;
-    const regimeScore = regime === C.trendPenaltyRegime ? w.regime * 0.3 : (regime === "RANGE" ? w.regime : w.regime * 0.7);
+    // regime is guaranteed RANGE at this point (hard-gated above), so this
+    // always awards the full regime weight — kept as a named score component
+    // (rather than inlined) so the quality breakdown UI keeps working.
+    const regimeScore = w.regime;
 
     const total = clamp(Math.round(depthScore + Math.min(wickScore, w.wick) + precisionScore + roomScore + regimeScore), 0, 100);
     const approved = total >= C.quality.minimumScore;
@@ -6985,24 +7094,24 @@ function placeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore = nu
 // setups get a longer one. CFG.RR is kept as the grade-2/B baseline so
 // existing saved settings still mean roughly what they used to.
 function gradeRR(quality) {
-  if (quality >= 3) return CFG.RR * 1.15;   // A-grade: let it run further
-  if (quality <= 1) return CFG.RR * 0.60;   // C-grade: take profit sooner
+  if (quality >= 3) return CFG.RR * 1.06;   // A-grade: small bump only — no more 2R+ targets from grade alone
+  if (quality <= 1) return CFG.RR * 0.94;   // C-grade: small trim only
   return CFG.RR;                             // B-grade: baseline
 }
 
 // Continuous version of the same idea, using the raw 0-100 quality score
 // when available instead of the coarse 1/2/3-star bucket — so a 66 and a 99
 // don't get an identical target just because both land in the same bucket.
-// Anchored to match gradeRR() at the bucket boundaries (0.60x / 1.00x /
-// 1.15x) but extends slightly past 1.15x for truly exceptional scores, since
-// those setups have the most room to earn a bigger target. Falls back to
-// null (caller uses gradeRR) when no score is supplied.
+// REALISTIC RR MODEL — the adjustment is deliberately kept tiny (0.94x to
+// 1.06x of CFG.RR) so a high quality score can no longer manufacture a 2R+
+// target on its own. With CFG.RR = 1.55 this keeps every trade's target in
+// roughly the 1.45R-1.65R band regardless of grade — realistic for BTCUSD
+// M1 execution rather than a theoretical-reward-maximizing scheme. Falls
+// back to null (caller uses gradeRR) when no score is supplied.
 function gradeRRContinuous(score) {
   if (!Number.isFinite(score)) return null;
   const s = Math.max(0, Math.min(100, score));
-  const factor = s <= 50
-    ? 0.60 + (s / 50) * 0.40          // 0   → 50  maps 0.60x → 1.00x
-    : 1.00 + ((s - 50) / 50) * 0.25;  // 50  → 100 maps 1.00x → 1.25x
+  const factor = 0.94 + (s / 100) * 0.12;   // 0 → 100 maps 0.94x → 1.06x
   return CFG.RR * factor;
 }
 
@@ -7917,6 +8026,7 @@ async function testBrokerConnection() {
 }
 
 function saveSettings() {
+  const _brokerEnabledBeforeSave = LiveBroker.enabled;
   const newBal = parseFloat($('cfgDemoBalance').value) || 0;
   CFG.DEMO_BALANCE  = newBal;
   CFG.PROFIT_TARGET = parseFloat($('cfgProfitTarget').value) || 0;
@@ -7981,8 +8091,13 @@ function saveSettings() {
   LiveBroker.token     = $('cfgBrokerToken').value.trim();
   LiveBroker.region    = $('cfgBrokerRegion').value;
   LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDz';
+  const feedSourceChanged = LiveBroker.enabled !== _brokerEnabledBeforeSave;
   LiveBroker.save();
   updateModeBadge();
+  if (feedSourceChanged) {
+    addSignal('info', `Switching price feed to ${LiveBroker.enabled ? 'Exness (MetaApi)' : 'Coinbase'}...`, null);
+    connect(() => {});
+  }
   updateStatsStrip(); updateTargetBar(); updateDepositNotice();
   const saved=$('settingsSaved');
   saved.style.opacity='1';
@@ -8443,12 +8558,153 @@ function _handleCoinbaseMsg(msg) {
   if (!replay.active) runStrategy();
 }
 
-// ── PRIMARY CONNECT — Coinbase public API (primary and only data source) ──
+// ── EXNESS LIVE FEED ENGINE (via MetaApi) ──────────────────────────────────
+// Used instead of the Coinbase feed whenever Live Trading is on, so the
+// price the bot reacts to matches the price your broker is actually quoting
+// (Exness's BTCUSDz can drift from Coinbase's BTC-USD, especially spread and
+// during volatile moves). This is REST polling, not a true tick-by-tick
+// WebSocket stream — MetaApi's real streaming API uses a stateful
+// socket.io-based synchronization protocol meant for their Node/Python SDK,
+// which isn't practical to reimplement by hand from raw fetch calls. Polling
+// once per second is a close approximation and is what most of this bot's
+// own decision loop needs anyway (it evaluates per-minute candles).
+const EXNESS_TF_MAP = { 60: '1m', 300: '5m', 900: '15m' };
+let _exPollTimer = null;
+let _exPollFailures = 0;
+
+async function _exFetchCandles(gran, count) {
+  const tf = EXNESS_TF_MAP[gran];
+  const rows = await LiveBroker.getHistoricalCandles(tf, count);
+  return (rows || [])
+    .map(c => ({ epoch: Math.floor(new Date(c.time).getTime() / 1000), low: +c.low, high: +c.high, open: +c.open, close: +c.close }))
+    .sort((a, b) => a.epoch - b.epoch);
+}
+
+async function _exLoadHistory(onStep = () => {}) {
+  const specs = [[60, 500, '1min'], [300, 200, '5min'], [900, 100, '15min']];
+  for (const [gran, count, label] of specs) {
+    onStep(`Loading ${label} candles from Exness...`);
+    try {
+      const arr = await _exFetchCandles(gran, count);
+      if (btFetching) continue;
+      if (arr.length) {
+        candles[gran] = arr;
+        addSignal('info', `${arr.length} ${label} candles loaded from Exness`, null);
+        drawChart();
+        if (gran === 60 && _gapCheckPending) _scanGapPositions();
+      } else {
+        addSignal('warn', `Exness returned 0 ${label} candles — keeping existing chart data`, null);
+      }
+    } catch (e) {
+      // Non-fatal: keep whatever candles are already loaded (e.g. from Coinbase
+      // at boot) rather than blanking the chart if this endpoint/timeframe
+      // format needs adjusting for your account.
+      addSignal('warn', `Exness history load failed (${label}): ${e.message}`, null);
+    }
+  }
+}
+
+function _handleExnessPrice(priceObj) {
+  if (typeof replay !== 'undefined' && replay.active) return;
+  const newBid = +priceObj.bid, newAsk = +priceObj.ask;
+  if (!newBid || !newAsk) return;
+  const newMid = (newBid + newAsk) / 2;
+  const epochSec = priceObj.time ? Math.floor(new Date(priceObj.time).getTime() / 1000) : Math.floor(Date.now() / 1000);
+
+  if (mid && newMid !== mid) {
+    const diff = newMid - mid, dir = diff > 0 ? 'up' : 'dn';
+    const chgEl = $('priceChg');
+    chgEl.textContent = `${diff > 0 ? '+' : ''}${diff.toFixed(2)}`;
+    chgEl.className   = `price-chg ${dir}`;
+    flashPrice(dir);
+  }
+  bid = newBid; ask = newAsk;
+  prevMid = mid; mid = newMid;
+  $('priceMain').textContent = mid.toFixed(2);
+  updatePriceBadges(bid, ask);
+
+  _processTick(newMid, epochSec);
+  checkDemoPositions();
+  if (!replay.active) runStrategy();
+}
+
+const EXNESS_POLL_BASE_MS = 1500;
+const EXNESS_POLL_MAX_MS  = 15000; // cap backoff so a stuck feed still checks periodically
+let _exPollIntervalMs = EXNESS_POLL_BASE_MS;
+let _exHistoryRefreshCounter = 0;
+
+function _exScheduleNextPoll(onStep) {
+  if (_exPollTimer) clearTimeout(_exPollTimer);
+  _exPollTimer = setTimeout(() => _pollExnessPrice(onStep), _exPollIntervalMs);
+}
+
+async function _pollExnessPrice(onStep) {
+  try {
+    const p = await LiveBroker.getCurrentPrice();
+    _handleExnessPrice(p);
+    if (_exPollFailures > 0) { addSignal('info', 'Exness feed recovered', null); }
+    _exPollFailures = 0;
+    _exPollIntervalMs = EXNESS_POLL_BASE_MS;
+    setConn('on');
+    // Candles only need refreshing occasionally, not every 1.5s tick — every
+    // ~60 successful polls (~90s) re-pull the latest M1/M5/M15 bars so a
+    // freshly-closed candle shows up without re-fetching full history each time.
+    _exHistoryRefreshCounter++;
+    if (_exHistoryRefreshCounter >= 60) {
+      _exHistoryRefreshCounter = 0;
+      _exLoadHistory(() => {}).catch(() => {});
+    }
+  } catch (e) {
+    _exPollFailures++;
+    // Back off exponentially (capped) so a down endpoint doesn't get hammered
+    // once a second forever; recovers to the base interval as soon as a poll
+    // succeeds again above.
+    _exPollIntervalMs = Math.min(EXNESS_POLL_MAX_MS, EXNESS_POLL_BASE_MS * Math.pow(1.6, Math.min(_exPollFailures, 8)));
+    setConn(_exPollFailures >= 6 ? 'off' : 'wait');
+    if (_exPollFailures === 1 || _exPollFailures % 10 === 0) {
+      addSignal('warn', `Exness feed poll failed (attempt ${_exPollFailures}, retrying in ${(_exPollIntervalMs / 1000).toFixed(1)}s): ${e.message}`, null);
+    }
+  }
+  _exScheduleNextPoll(onStep);
+}
+
+function _connectExnessFeed(onStep = () => {}) {
+  if (_exPollTimer) { clearTimeout(_exPollTimer); clearInterval(_exPollTimer); _exPollTimer = null; }
+  if (_cbWS) { try { _cbWS.close(); } catch(_) {} _cbWS = null; }
+
+  addSignal('info', 'Connecting to Exness live feed via MetaApi...', null);
+  onStep('Connecting to Exness (MetaApi)...');
+  setConn('wait');
+
+  if (!LiveBroker.configured()) {
+    addSignal('warn', 'Exness feed requested but broker isn\'t configured — falling back to Coinbase', null);
+    _connectCoinbase(onStep);
+    return;
+  }
+
+  _cbHistoryPromise = _exLoadHistory(onStep);
+  _exPollFailures = 0;
+  _exPollIntervalMs = EXNESS_POLL_BASE_MS;
+  _exHistoryRefreshCounter = 0;
+
+  // First price immediately, then keep polling — interval self-adjusts on
+  // failure (see _pollExnessPrice), so no fixed setInterval here.
+  _pollExnessPrice(onStep).then(() => {
+    authed = true;
+    onStep('Live Exness feed connected');
+    addSignal('info', `Exness connected — ${LiveBroker.symbol} live feed active`, null);
+    _notifyFirstConnect();
+  });
+}
+
+// ── PRIMARY CONNECT — Coinbase (demo) or Exness via MetaApi (live) ──
 function connect(onStep) {
   if (_cbWS) { try { _cbWS.close(); } catch(_) {} _cbWS = null; }
   if (_cbReconnectTimer) { clearTimeout(_cbReconnectTimer); _cbReconnectTimer = null; }
+  if (_exPollTimer) { clearTimeout(_exPollTimer); _exPollTimer = null; }
   setConn('wait');
-  _connectCoinbase(onStep);
+  if (LiveBroker.enabled) { _connectExnessFeed(onStep); }
+  else { _connectCoinbase(onStep); }
 }
 
 // ── BOOT SEQUENCE — "Revolver 19 Pro" loading screen ──────────────────────
@@ -8504,6 +8760,36 @@ function evalContinuation(dir) {
 }
 
 
+// ── STRATEGY SELECTION ──
+// Shared by the live runner (runStrategy) and the backtester
+// (_evaluateEntry) so both use the exact same selection philosophy —
+// required by the "backtest/live consistency" spec. Collects all six
+// candidates (Strategy 1/2/3 × BUY/SELL), rejects invalid/duplicate ones,
+// and ranks the rest by quality score so the strongest valid setup wins —
+// Strategy 1 is no longer automatically preferred just because it's
+// evaluated first; a high-quality pullback or range setup can now beat a
+// weaker breakout.
+//
+// `candidates` is an array of { key, evalRes, isDup } where key is one of
+// 'S1_BUY'/'S1_SELL'/'S2_BUY'/'S2_SELL'/'S3_BUY'/'S3_SELL'. Returns the
+// winning candidate object, or null if nothing qualifies.
+function selectStrongestStrategyCandidate(candidates) {
+  const valid = candidates.filter(c => c.evalRes && c.evalRes.signal && !c.isDup);
+  if (!valid.length) return null;
+  valid.sort((a, b) => {
+    const qa = Number.isFinite(a.evalRes.qualityScore) ? a.evalRes.qualityScore : -1;
+    const qb = Number.isFinite(b.evalRes.qualityScore) ? b.evalRes.qualityScore : -1;
+    return qb - qa;   // strongest quality score first
+  });
+  return valid[0];
+}
+
+// ── LIVE STRATEGY EVAL CACHE ── (see runStrategy) — avoids recomputing all
+// six strategy candidates on every tick; only recalculates when a new
+// completed M1 candle is available.
+let lastStrategyEvalEpoch = null;
+let lastStrategyCandidates = null;
+
 // ── STRATEGY RUNNER ──
 let lastTradedBullSweepIdx = -1;
 let lastTradedBearSweepIdx = -1;
@@ -8540,9 +8826,33 @@ function runStrategy() {
   if (demoPositions.length >= CFG.MAX_CONCURRENT_POS) return;
 
   // ── EVALUATE SIGNALS ──
-  // Strategy chain: M5 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
-  const bs = strategy.evalBuy(mid);
-  const ss = strategy.evalSell(mid);
+  // LIVE PERFORMANCE CACHE — only re-run the full strategy engine when a new
+  // completed M1 candle is available (or nothing has been evaluated yet).
+  // Cheap read-only calls (updateConditionals/updateStrengthGauge/UI) still
+  // run every tick off the cached candidates; the actual six-way strategy
+  // evaluation, which is the expensive part, only re-runs once per closed
+  // M1 bar — mirrors lastStrategyEvalEpoch/lastStrategyCandidates from spec.
+  const completedM1 = candles[60].slice(0, -1);
+  const latestClosedEpoch = completedM1.length ? completedM1[completedM1.length - 1].epoch : null;
+
+  let cands;
+  if (latestClosedEpoch !== null && latestClosedEpoch === lastStrategyEvalEpoch && lastStrategyCandidates) {
+    cands = lastStrategyCandidates;
+  } else {
+    // Strategy chain: M5 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
+    cands = {
+      bs: strategy.evalBuy(mid),
+      ss: strategy.evalSell(mid),
+      ps: strategy.evalBuy2(mid),
+      qs: strategy.evalSell2(mid),
+      rs: strategy.evalBuy3(mid),
+      zs: strategy.evalSell3(mid),
+    };
+    lastStrategyEvalEpoch = latestClosedEpoch;
+    lastStrategyCandidates = cands;
+  }
+  const { bs, ss, ps, qs, rs, zs } = cands;
+
   updateConditionals(bs.conds, ss.conds);
   updateStrengthGauge(bs.strength, ss.strength);
 
@@ -8562,7 +8872,9 @@ function runStrategy() {
     }
   }
 
-  // ── SWEEP EPOCH DEDUPLICATION (shortened cooldown + tighter price tolerance so more setups qualify) ──
+  // ── DEDUPLICATION — computed for all six candidates up front so the
+  // ranking step below can freely pick whichever is strongest without
+  // re-deriving dup state per branch. ──
   const COOLDOWN   = 10 * 1000;   // was 20s (originally 3.5 min) — shorter gap before re-trading the same level
   const PRICE_TOL  = 0.05;        // was 0.21
 
@@ -8574,121 +8886,75 @@ function runStrategy() {
     (now - lastTradedBearSweepEpoch < COOLDOWN) ||
     (ss.sweepHigh !== undefined && Math.abs(ss.sweepHigh - lastTradedBearSweepPrice) < PRICE_TOL)
   );
+  const isPullBuyDup = ps.epoch !== undefined && (
+    ps.epoch === lastTradedPullbackBuyEpoch ||
+    (now - lastTradedPullbackBuyMs < EMA_PULLBACK_CFG.cooldownMs)
+  );
+  const isPullSellDup = qs.epoch !== undefined && (
+    qs.epoch === lastTradedPullbackSellEpoch ||
+    (now - lastTradedPullbackSellMs < EMA_PULLBACK_CFG.cooldownMs)
+  );
+  const isRangeBuyDup = rs.epoch !== undefined && (
+    rs.epoch === lastTradedRangeBuyEpoch ||
+    (now - lastTradedRangeBuyMs < RANGE_BOUNCE_CFG.cooldownMs)
+  );
+  const isRangeSellDup = zs.epoch !== undefined && (
+    zs.epoch === lastTradedRangeSellEpoch ||
+    (now - lastTradedRangeSellMs < RANGE_BOUNCE_CFG.cooldownMs)
+  );
 
-  // ── FIRE BUY ──
-  if (bs.signal && bs.sweepEpoch !== undefined && !isBullDup) {
-    lastSigMs = now;
-    lastTradedBullSweepIdx   = bs.sweepIdx;
-    lastTradedBullSweepEpoch = now;
-    lastTradedBullSweepPrice = bs.sweepLow || 0;
-    const sess  = strategy.activeSession() || 'SESSION';
-    const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-    const grade = bs.legacyGrade >= 3 ? '★★★' : bs.legacyGrade === 2 ? '★★' : '★';
-    const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-    addSignal('buy',
-      `[${sess}]${kzTag} BUY ${grade}${nTag} — Momentum Breakout · Quality ${bs.qualityScore != null ? Math.round(bs.qualityScore) : '—'} (${bs.raw && bs.raw.quality ? bs.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
-    // SL placed at M5 sweep candle low (new strategy spec)
-    placeDemoTrade('UP', bs.slRef || bs.ob, bs.legacyGrade, bs.raw, bs.qualityScore);
+  // ── STRATEGY SELECTION — rank all valid, non-duplicate candidates by
+  // quality score and fire only the single strongest one. Strategy 1 no
+  // longer wins automatically just for being evaluated first: a
+  // high-quality Strategy 2/3 setup can now outrank a weaker breakout. ──
+  const winner = selectStrongestStrategyCandidate([
+    { key: 'S1_BUY',  evalRes: bs, isDup: isBullDup || bs.sweepEpoch === undefined },
+    { key: 'S1_SELL', evalRes: ss, isDup: isBearDup || ss.sweepEpoch === undefined },
+    { key: 'S2_BUY',  evalRes: ps, isDup: isPullBuyDup },
+    { key: 'S2_SELL', evalRes: qs, isDup: isPullSellDup },
+    { key: 'S3_BUY',  evalRes: rs, isDup: isRangeBuyDup },
+    { key: 'S3_SELL', evalRes: zs, isDup: isRangeSellDup },
+  ]);
+  if (!winner) return;
 
-  // ── FIRE SELL ──
-  } else if (ss.signal && ss.sweepEpoch !== undefined && !isBearDup) {
-    lastSigMs = now;
-    lastTradedBearSweepIdx   = ss.sweepIdx;
-    lastTradedBearSweepEpoch = now;
-    lastTradedBearSweepPrice = ss.sweepHigh || 0;
-    const sess  = strategy.activeSession() || 'SESSION';
-    const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-    const grade = ss.legacyGrade >= 3 ? '★★★' : ss.legacyGrade === 2 ? '★★' : '★';
-    const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-    addSignal('sell',
-      `[${sess}]${kzTag} SELL ${grade}${nTag} — Momentum Breakout · Quality ${ss.qualityScore != null ? Math.round(ss.qualityScore) : '—'} (${ss.raw && ss.raw.quality ? ss.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
-    // SL placed at M5 sweep candle high (new strategy spec)
-    placeDemoTrade('DOWN', ss.slRef || ss.ob, ss.legacyGrade, ss.raw, ss.qualityScore);
+  const sess  = strategy.activeSession() || 'SESSION';
+  const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
+  const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
+  const gradeStars = g => g >= 3 ? '★★★' : g === 2 ? '★★' : '★';
 
-  // ── STRATEGY 2: EMA PULLBACK CONTINUATION ──
-  // Only reached when Strategy 1 (Momentum Breakout) found nothing to fire
-  // on THIS tick — so this strategy only ever ADDS trade opportunities on
-  // top of Strategy 1's, it never displaces or reduces them.
-  } else {
-    const ps = strategy.evalBuy2(mid);
-    const qs = strategy.evalSell2(mid);
+  lastSigMs = now;
 
-    const isPullBuyDup = ps.epoch !== undefined && (
-      ps.epoch === lastTradedPullbackBuyEpoch ||
-      (now - lastTradedPullbackBuyMs < EMA_PULLBACK_CFG.cooldownMs)
-    );
-    const isPullSellDup = qs.epoch !== undefined && (
-      qs.epoch === lastTradedPullbackSellEpoch ||
-      (now - lastTradedPullbackSellMs < EMA_PULLBACK_CFG.cooldownMs)
-    );
-
-    if (ps.signal && !isPullBuyDup) {
-      lastSigMs = now;
-      lastTradedPullbackBuyEpoch = ps.epoch;
-      lastTradedPullbackBuyMs = now;
-      const sess  = strategy.activeSession() || 'SESSION';
-      const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-      const grade = ps.legacyGrade >= 3 ? '★★★' : ps.legacyGrade === 2 ? '★★' : '★';
-      const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-      addSignal('buy',
-        `[${sess}]${kzTag} BUY ${grade}${nTag} — EMA Pullback Continuation · Quality ${ps.qualityScore != null ? Math.round(ps.qualityScore) : '—'} (${ps.quality ? ps.quality.grade : '?'}) ✓ SL@swing`, mid);
+  switch (winner.key) {
+    case 'S1_BUY':
+      lastTradedBullSweepIdx = bs.sweepIdx; lastTradedBullSweepEpoch = now; lastTradedBullSweepPrice = bs.sweepLow || 0;
+      addSignal('buy', `[${sess}]${kzTag} BUY ${gradeStars(bs.legacyGrade)}${nTag} — Momentum Breakout · Quality ${bs.qualityScore != null ? Math.round(bs.qualityScore) : '—'} (${bs.raw && bs.raw.quality ? bs.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
+      placeDemoTrade('UP', bs.slRef || bs.ob, bs.legacyGrade, bs.raw, bs.qualityScore);
+      break;
+    case 'S1_SELL':
+      lastTradedBearSweepIdx = ss.sweepIdx; lastTradedBearSweepEpoch = now; lastTradedBearSweepPrice = ss.sweepHigh || 0;
+      addSignal('sell', `[${sess}]${kzTag} SELL ${gradeStars(ss.legacyGrade)}${nTag} — Momentum Breakout · Quality ${ss.qualityScore != null ? Math.round(ss.qualityScore) : '—'} (${ss.raw && ss.raw.quality ? ss.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
+      placeDemoTrade('DOWN', ss.slRef || ss.ob, ss.legacyGrade, ss.raw, ss.qualityScore);
+      break;
+    case 'S2_BUY':
+      lastTradedPullbackBuyEpoch = ps.epoch; lastTradedPullbackBuyMs = now;
+      addSignal('buy', `[${sess}]${kzTag} BUY ${gradeStars(ps.legacyGrade)}${nTag} — EMA Pullback Continuation · Quality ${ps.qualityScore != null ? Math.round(ps.qualityScore) : '—'} (${ps.quality ? ps.quality.grade : '?'}) ✓ SL@swing`, mid);
       placeDemoTrade('UP', ps.slRef || ps.ob, ps.legacyGrade, null, ps.qualityScore);
-
-    } else if (qs.signal && !isPullSellDup) {
-      lastSigMs = now;
-      lastTradedPullbackSellEpoch = qs.epoch;
-      lastTradedPullbackSellMs = now;
-      const sess  = strategy.activeSession() || 'SESSION';
-      const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-      const grade = qs.legacyGrade >= 3 ? '★★★' : qs.legacyGrade === 2 ? '★★' : '★';
-      const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-      addSignal('sell',
-        `[${sess}]${kzTag} SELL ${grade}${nTag} — EMA Pullback Continuation · Quality ${qs.qualityScore != null ? Math.round(qs.qualityScore) : '—'} (${qs.quality ? qs.quality.grade : '?'}) ✓ SL@swing`, mid);
+      break;
+    case 'S2_SELL':
+      lastTradedPullbackSellEpoch = qs.epoch; lastTradedPullbackSellMs = now;
+      addSignal('sell', `[${sess}]${kzTag} SELL ${gradeStars(qs.legacyGrade)}${nTag} — EMA Pullback Continuation · Quality ${qs.qualityScore != null ? Math.round(qs.qualityScore) : '—'} (${qs.quality ? qs.quality.grade : '?'}) ✓ SL@swing`, mid);
       placeDemoTrade('DOWN', qs.slRef || qs.ob, qs.legacyGrade, null, qs.qualityScore);
-
-    // ── STRATEGY 3: RANGE-EDGE REJECTION ──
-    // Only reached when NEITHER Strategy 1 nor Strategy 2 fired on this
-    // tick — so, same as Strategy 2's relationship to Strategy 1, this
-    // purely ADDS trade opportunities on top of what the first two already
-    // found. It never displaces or reduces either one's frequency.
-    } else {
-      const rs = strategy.evalBuy3(mid);
-      const zs = strategy.evalSell3(mid);
-
-      const isRangeBuyDup = rs.epoch !== undefined && (
-        rs.epoch === lastTradedRangeBuyEpoch ||
-        (now - lastTradedRangeBuyMs < RANGE_BOUNCE_CFG.cooldownMs)
-      );
-      const isRangeSellDup = zs.epoch !== undefined && (
-        zs.epoch === lastTradedRangeSellEpoch ||
-        (now - lastTradedRangeSellMs < RANGE_BOUNCE_CFG.cooldownMs)
-      );
-
-      if (rs.signal && !isRangeBuyDup) {
-        lastSigMs = now;
-        lastTradedRangeBuyEpoch = rs.epoch;
-        lastTradedRangeBuyMs = now;
-        const sess  = strategy.activeSession() || 'SESSION';
-        const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-        const grade = rs.legacyGrade >= 3 ? '★★★' : rs.legacyGrade === 2 ? '★★' : '★';
-        const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-        addSignal('buy',
-          `[${sess}]${kzTag} BUY ${grade}${nTag} — Range-Edge Rejection · Quality ${rs.qualityScore != null ? Math.round(rs.qualityScore) : '—'} (${rs.quality ? rs.quality.grade : '?'}) ✓ SL@range`, mid);
-        placeDemoTrade('UP', rs.slRef || rs.ob, rs.legacyGrade, null, rs.qualityScore);
-
-      } else if (zs.signal && !isRangeSellDup) {
-        lastSigMs = now;
-        lastTradedRangeSellEpoch = zs.epoch;
-        lastTradedRangeSellMs = now;
-        const sess  = strategy.activeSession() || 'SESSION';
-        const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
-        const grade = zs.legacyGrade >= 3 ? '★★★' : zs.legacyGrade === 2 ? '★★' : '★';
-        const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
-        addSignal('sell',
-          `[${sess}]${kzTag} SELL ${grade}${nTag} — Range-Edge Rejection · Quality ${zs.qualityScore != null ? Math.round(zs.qualityScore) : '—'} (${zs.quality ? zs.quality.grade : '?'}) ✓ SL@range`, mid);
-        placeDemoTrade('DOWN', zs.slRef || zs.ob, zs.legacyGrade, null, zs.qualityScore);
-      }
-    }
+      break;
+    case 'S3_BUY':
+      lastTradedRangeBuyEpoch = rs.epoch; lastTradedRangeBuyMs = now;
+      addSignal('buy', `[${sess}]${kzTag} BUY ${gradeStars(rs.legacyGrade)}${nTag} — Range-Edge Rejection · Quality ${rs.qualityScore != null ? Math.round(rs.qualityScore) : '—'} (${rs.quality ? rs.quality.grade : '?'}) ✓ SL@range`, mid);
+      placeDemoTrade('UP', rs.slRef || rs.ob, rs.legacyGrade, null, rs.qualityScore);
+      break;
+    case 'S3_SELL':
+      lastTradedRangeSellEpoch = zs.epoch; lastTradedRangeSellMs = now;
+      addSignal('sell', `[${sess}]${kzTag} SELL ${gradeStars(zs.legacyGrade)}${nTag} — Range-Edge Rejection · Quality ${zs.qualityScore != null ? Math.round(zs.qualityScore) : '—'} (${zs.quality ? zs.quality.grade : '?'}) ✓ SL@range`, mid);
+      placeDemoTrade('DOWN', zs.slRef || zs.ob, zs.legacyGrade, null, zs.qualityScore);
+      break;
   }
 }
 
@@ -8725,6 +8991,7 @@ function startBot() {
   lastTradedBullSweepIdx = -1; lastTradedBearSweepIdx = -1;
   lastTradedBullSweepEpoch = 0; lastTradedBearSweepEpoch = 0;
   lastTradedBullSweepPrice = 0; lastTradedBearSweepPrice = 0;
+  lastStrategyEvalEpoch = null; lastStrategyCandidates = null;
   if(!authed && demoBalance > 0 && hardFloor === 0) resetHardFloor(demoBalance);
   if(!authed) demoStartBal = demoBalance;
   if(authed && !startBalance && balance) { startBalance=balance; CFG.START_BALANCE=balance; }
@@ -9485,6 +9752,16 @@ const replay = {
       let pathHigh = candle.open;
       let pathLow  = candle.open;
 
+      // ── MFE/MAE tracking — favorable/adverse excursion in $ price terms,
+      // updated from the same path watermarks used for trailing. Recorded
+      // on the trade at close time for the performance report. ──
+      const favWater = isBuy ? candle.high : candle.low;
+      const advWater = isBuy ? candle.low : candle.high;
+      const favExcursion = isBuy ? (favWater - pos.entry) : (pos.entry - favWater);
+      const advExcursion = isBuy ? (pos.entry - advWater) : (advWater - pos.entry);
+      pos.mfe = Math.max(pos.mfe || 0, favExcursion);
+      pos.mae = Math.max(pos.mae || 0, advExcursion);
+
       for (const price of path) {
         if (closed) break;
 
@@ -9582,6 +9859,9 @@ const replay = {
         slDist: +(pos.slDist || Math.abs(pos.entry - pos.slPrice)).toFixed(2),
         rr: CFG.RR,
         quality: pos.quality,
+        strategyFamily: pos.strategyFamily || 'S1',
+        mfe: +(pos.mfe || 0).toFixed(2),
+        mae: +(pos.mae || 0).toFixed(2),
         // ── Sizing ──
         lots: pos.lots,
         slAmount: +(pos.slAmount || 0).toFixed(2),
@@ -9634,6 +9914,10 @@ const replay = {
 
     const bs = strategy.evalBuy(price);
     const ss = strategy.evalSell(price);
+    const ps = strategy.evalBuy2(price);
+    const qs = strategy.evalSell2(price);
+    const rs = strategy.evalBuy3(price);
+    const zs = strategy.evalSell3(price);
     let sig = null;
 
     // ── Epoch + price dedup — mirrors runStrategy live dedup exactly ──
@@ -9653,67 +9937,65 @@ const replay = {
       (epoch - this.replayLastBearEpoch < SWEEP_COOLDOWN_S) ||
       (Math.abs((ss.sweepHigh || 0) - this.replayLastBearPrice) < SWEEP_PRICE_TOL)
     );
+    const pullCooldownS = EMA_PULLBACK_CFG.cooldownMs / 1000;
+    const isPullBuyDup = ps.epoch !== undefined && (
+      ps.epoch === this.replayLastPullbackBuyEpoch ||
+      (epoch - this.replayLastPullbackBuyEpoch) < pullCooldownS
+    );
+    const isPullSellDup = qs.epoch !== undefined && (
+      qs.epoch === this.replayLastPullbackSellEpoch ||
+      (epoch - this.replayLastPullbackSellEpoch) < pullCooldownS
+    );
+    const rangeCooldownS = RANGE_BOUNCE_CFG.cooldownMs / 1000;
+    const isRangeBuyDup = rs.epoch !== undefined && (
+      rs.epoch === this.replayLastRangeBuyEpoch ||
+      (epoch - this.replayLastRangeBuyEpoch) < rangeCooldownS
+    );
+    const isRangeSellDup = zs.epoch !== undefined && (
+      zs.epoch === this.replayLastRangeSellEpoch ||
+      (epoch - this.replayLastRangeSellEpoch) < rangeCooldownS
+    );
 
-    if (bs.signal && bs.sweepEpoch !== undefined && !isBullDup) {
-      sig = { dir: 'UP', ob: bs.ob, quality: bs.legacyGrade, raw: bs.raw, qualityScore: bs.qualityScore };
-      this.replayLastBullEpoch = epoch;
-      this.replayLastBullPrice = bs.sweepLow  || 0;
-    } else if (ss.signal && ss.sweepEpoch !== undefined && !isBearDup) {
-      sig = { dir: 'DOWN', ob: ss.ob, quality: ss.legacyGrade, raw: ss.raw, qualityScore: ss.qualityScore };
-      this.replayLastBearEpoch = epoch;
-      this.replayLastBearPrice = ss.sweepHigh || 0;
-    }
+    // ── STRATEGY SELECTION — same quality-ranked selection as the live
+    // runner (selectStrongestStrategyCandidate): evaluate all six
+    // candidates, reject invalid/duplicate ones, fire only the strongest
+    // valid setup by quality score. This is the BACKTEST ≡ LIVE consistency
+    // requirement — both engines now use the identical selection function. ──
+    const winner = selectStrongestStrategyCandidate([
+      { key: 'S1_BUY',  evalRes: bs, isDup: isBullDup || bs.sweepEpoch === undefined },
+      { key: 'S1_SELL', evalRes: ss, isDup: isBearDup || ss.sweepEpoch === undefined },
+      { key: 'S2_BUY',  evalRes: ps, isDup: isPullBuyDup },
+      { key: 'S2_SELL', evalRes: qs, isDup: isPullSellDup },
+      { key: 'S3_BUY',  evalRes: rs, isDup: isRangeBuyDup },
+      { key: 'S3_SELL', evalRes: zs, isDup: isRangeSellDup },
+    ]);
 
-    // ── STRATEGY 2 & 3 FALLBACK ──
-    // Only reached when Strategy 1 found nothing this bar — mirrors
-    // runStrategy()'s live-mode chain exactly (see there for why this
-    // ordering is additive-only: it can never reduce Strategy 1's
-    // frequency, only add on top of it). This also closes a real
-    // BACKTEST ≡ LIVE gap: the backtest engine previously only ever
-    // evaluated Strategy 1 here, so Strategy 2 (EMA Pullback) never got
-    // exercised in a backtest run at all, despite firing live. Fixed by
-    // giving both fallback strategies the same epoch-based dedup treatment
-    // used for Strategy 1's sweep dedup above (backtest has no wall clock,
-    // so epoch-seconds substitutes for the live path's Date.now()).
-    if (!sig) {
-      const ps = strategy.evalBuy2(price);
-      const qs = strategy.evalSell2(price);
-      const pullCooldownS = EMA_PULLBACK_CFG.cooldownMs / 1000;
-      const isPullBuyDup = ps.epoch !== undefined && (
-        ps.epoch === this.replayLastPullbackBuyEpoch ||
-        (epoch - this.replayLastPullbackBuyEpoch) < pullCooldownS
-      );
-      const isPullSellDup = qs.epoch !== undefined && (
-        qs.epoch === this.replayLastPullbackSellEpoch ||
-        (epoch - this.replayLastPullbackSellEpoch) < pullCooldownS
-      );
-
-      if (ps.signal && !isPullBuyDup) {
-        sig = { dir: 'UP', ob: ps.ob, quality: ps.legacyGrade, raw: null, qualityScore: ps.qualityScore };
-        this.replayLastPullbackBuyEpoch = epoch;
-      } else if (qs.signal && !isPullSellDup) {
-        sig = { dir: 'DOWN', ob: qs.ob, quality: qs.legacyGrade, raw: null, qualityScore: qs.qualityScore };
-        this.replayLastPullbackSellEpoch = epoch;
-      } else {
-        const rs = strategy.evalBuy3(price);
-        const zs = strategy.evalSell3(price);
-        const rangeCooldownS = RANGE_BOUNCE_CFG.cooldownMs / 1000;
-        const isRangeBuyDup = rs.epoch !== undefined && (
-          rs.epoch === this.replayLastRangeBuyEpoch ||
-          (epoch - this.replayLastRangeBuyEpoch) < rangeCooldownS
-        );
-        const isRangeSellDup = zs.epoch !== undefined && (
-          zs.epoch === this.replayLastRangeSellEpoch ||
-          (epoch - this.replayLastRangeSellEpoch) < rangeCooldownS
-        );
-
-        if (rs.signal && !isRangeBuyDup) {
-          sig = { dir: 'UP', ob: rs.ob, quality: rs.legacyGrade, raw: null, qualityScore: rs.qualityScore };
+    if (winner) {
+      switch (winner.key) {
+        case 'S1_BUY':
+          sig = { dir: 'UP', ob: bs.ob, quality: bs.legacyGrade, raw: bs.raw, qualityScore: bs.qualityScore, family: 'S1' };
+          this.replayLastBullEpoch = epoch; this.replayLastBullPrice = bs.sweepLow || 0;
+          break;
+        case 'S1_SELL':
+          sig = { dir: 'DOWN', ob: ss.ob, quality: ss.legacyGrade, raw: ss.raw, qualityScore: ss.qualityScore, family: 'S1' };
+          this.replayLastBearEpoch = epoch; this.replayLastBearPrice = ss.sweepHigh || 0;
+          break;
+        case 'S2_BUY':
+          sig = { dir: 'UP', ob: ps.ob, quality: ps.legacyGrade, raw: null, qualityScore: ps.qualityScore, family: 'S2' };
+          this.replayLastPullbackBuyEpoch = epoch;
+          break;
+        case 'S2_SELL':
+          sig = { dir: 'DOWN', ob: qs.ob, quality: qs.legacyGrade, raw: null, qualityScore: qs.qualityScore, family: 'S2' };
+          this.replayLastPullbackSellEpoch = epoch;
+          break;
+        case 'S3_BUY':
+          sig = { dir: 'UP', ob: rs.ob, quality: rs.legacyGrade, raw: null, qualityScore: rs.qualityScore, family: 'S3' };
           this.replayLastRangeBuyEpoch = epoch;
-        } else if (zs.signal && !isRangeSellDup) {
-          sig = { dir: 'DOWN', ob: zs.ob, quality: zs.legacyGrade, raw: null, qualityScore: zs.qualityScore };
+          break;
+        case 'S3_SELL':
+          sig = { dir: 'DOWN', ob: zs.ob, quality: zs.legacyGrade, raw: null, qualityScore: zs.qualityScore, family: 'S3' };
           this.replayLastRangeSellEpoch = epoch;
-        }
+          break;
       }
     }
 
@@ -9874,6 +10156,8 @@ const replay = {
       qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
       beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openEpoch: epoch, quality: sig.quality,
       qualityScore: sig.qualityScore,
+      strategyFamily: sig.family || 'S1',
+      mfe: 0, mae: 0,
       // ── Extended metadata for multi-run analysis ──
       openIndex: this.index,
       balBefore: this.replayBal,
@@ -9981,6 +10265,64 @@ const replay = {
     const avgWin    = closedTrades.filter(t=>t.pnl>0).length ? closedTrades.filter(t=>t.pnl>0).reduce((s,t)=>s+t.pnl,0)/this.replayWins : 0;
     const avgLoss   = this.replayLosses > 0 ? closedTrades.filter(t=>t.pnl<0).reduce((s,t)=>s+Math.abs(t.pnl),0)/this.replayLosses : 0;
     const pnlTotal  = this.replayBal - this.replayStartBal;
+
+    // ── EXPANDED PERFORMANCE METRICS ──
+    // R-multiple per trade, using the frozen entry-time risk amount as the
+    // denominator (matches the note on pos.riskAmount above — slAmount
+    // alone isn't trustworthy once a trade has moved to BE/trail).
+    const rMultiples = closedTrades
+      .map(t => (t.riskAmount > 0 ? t.pnl / t.riskAmount : null))
+      .filter(Number.isFinite);
+    const avgR = rMultiples.length ? rMultiples.reduce((s, r) => s + r, 0) / rMultiples.length : 0;
+
+    // Longest consecutive-loss streak across the closed-trade sequence
+    // (distinct from replayConsecLoss, which is the streak AT THE END of
+    // the run — this is the worst streak seen anywhere during it).
+    let maxConsecLosses = 0, _streak = 0;
+    closedTrades.forEach(t => { if (t.pnl < 0) { _streak++; maxConsecLosses = Math.max(maxConsecLosses, _streak); } else { _streak = 0; } });
+
+    const longTrades  = closedTrades.filter(t => t.dir === 'BUY');
+    const shortTrades = closedTrades.filter(t => t.dir === 'SELL');
+    const winRateOf = arr => arr.length ? +((arr.filter(t => t.pnl > 0).length / arr.length) * 100).toFixed(1) : 0;
+    const longWinRate  = winRateOf(longTrades);
+    const shortWinRate = winRateOf(shortTrades);
+
+    // Per-strategy-family breakdown — Strategy 1 (Momentum Breakout),
+    // Strategy 2 (EMA Pullback), Strategy 3 (Range-Edge Rejection).
+    const perFamily = {};
+    ['S1', 'S2', 'S3'].forEach(fam => {
+      const t = closedTrades.filter(x => (x.strategyFamily || 'S1') === fam);
+      perFamily[fam] = {
+        trades: t.length,
+        winRate: winRateOf(t),
+        netPnl: +t.reduce((s, x) => s + x.pnl, 0).toFixed(2),
+        profitFactor: (() => {
+          const num = t.filter(x => x.pnl > 0).reduce((s, x) => s + x.pnl, 0);
+          const den = t.filter(x => x.pnl < 0).reduce((s, x) => s + Math.abs(x.pnl), 0);
+          return den > 0 ? +(num / den).toFixed(3) : null;
+        })(),
+      };
+    });
+
+    // Trend-regime vs range-regime performance — approximated from which
+    // family produced the trade (S1/S2 only ever fire with-trend since the
+    // hard trend filter/EMA-trend gate, S3 only ever fires in RANGE regime
+    // per its hard gate above), since individual trade records don't carry
+    // a separate regime tag.
+    const trendRegimeTrades = closedTrades.filter(x => ['S1', 'S2'].includes(x.strategyFamily || 'S1'));
+    const rangeRegimeTrades = closedTrades.filter(x => (x.strategyFamily || 'S1') === 'S3');
+    const trendRegimePerf = { trades: trendRegimeTrades.length, winRate: winRateOf(trendRegimeTrades), netPnl: +trendRegimeTrades.reduce((s,x)=>s+x.pnl,0).toFixed(2) };
+    const rangeRegimePerf = { trades: rangeRegimeTrades.length, winRate: winRateOf(rangeRegimeTrades), netPnl: +rangeRegimeTrades.reduce((s,x)=>s+x.pnl,0).toFixed(2) };
+
+    const avgMFE = closedTrades.length ? +(closedTrades.reduce((s, t) => s + (t.mfe || 0), 0) / closedTrades.length).toFixed(2) : 0;
+    const avgMAE = closedTrades.length ? +(closedTrades.reduce((s, t) => s + (t.mae || 0), 0) / closedTrades.length).toFixed(2) : 0;
+
+    // Transaction-cost impact — total $ paid in spread + slippage across all
+    // closed trades, so gross-vs-net performance is visible directly
+    // (spec #17: performance must be judged AFTER costs, not on gross PnL).
+    const totalSpreadCost = +closedTrades.reduce((s, t) => s + (t.dynSpread || 0) * (t.lots || 0) * CONTRACT_SIZE, 0).toFixed(2);
+    const totalSlipCost   = +closedTrades.reduce((s, t) => s + Math.abs(t.slip || 0) * (t.lots || 0) * CONTRACT_SIZE, 0).toFixed(2);
+
     const result = {
       startBal: this.replayStartBal, endBal: this.replayBal,
       wins: this.replayWins, losses: this.replayLosses, maxDD: this.replayMaxDD,
@@ -10003,6 +10345,19 @@ const replay = {
       avgHoldBars, avgPnl: +avgPnl.toFixed(2),
       avgWin: +avgWin.toFixed(2), avgLoss: +avgLoss.toFixed(2),
       tpCount, slCount, beCount, trailCount, timeExitCount, partialCount, newsCount,
+      // ── Expanded metrics (see PRIMARY OBJECTIVE / PERFORMANCE METRICS spec) ──
+      totalTrades,
+      expectancyPerTrade: +avgPnl.toFixed(2),   // same figure as avgPnl, named per spec
+      expectancyR: +avgR.toFixed(3),
+      avgR: +avgR.toFixed(3),
+      maxConsecutiveLosses: maxConsecLosses,
+      longWinRate, shortWinRate,
+      longTrades: longTrades.length, shortTrades: shortTrades.length,
+      strategyPerformance: perFamily,           // { S1: {...}, S2: {...}, S3: {...} }
+      trendRegimePerformance: trendRegimePerf,
+      rangeRegimePerformance: rangeRegimePerf,
+      avgMFE, avgMAE,
+      totalSpreadCost, totalSlipCost,
       settings: {
         riskPct: CFG.RISK_PCT, rr: CFG.RR,
         maxDDPct: CFG.MAX_DD_PCT, maxLotCap: CFG.MAX_LOT_CAP,
@@ -10107,7 +10462,107 @@ function btCheckReady() {
   $(id).addEventListener('input', btCheckReady);
 });
 
+// ── BACKTEST DATA — Exness (MetaApi) first, Coinbase fills whatever's older
+// than the broker's available history ──────────────────────────────────────
+// MT5/MT4 crypto CFD symbols usually only carry a limited window of M1
+// history server-side (often months, not years), so a long backtest range
+// will typically get its recent portion from the real Exness quotes (which
+// is what live trading actually sees) and its older portion backfilled from
+// Coinbase's deep public history. Only M1 (granularity 60) is ever requested
+// by the backtest UI, so this only needs to support that timeframe.
+const EXNESS_BT_TF_MAP = { 60: '1m', 300: '5m', 900: '15m' };
+
+async function _fetchExnessBtPage(tf, beforeEpoch, limit) {
+  const startTimeIso = new Date(beforeEpoch * 1000).toISOString();
+  const rows = await LiveBroker.getHistoricalCandles(tf, limit, startTimeIso);
+  return (rows || [])
+    .map(c => ({ epoch: Math.floor(new Date(c.time).getTime() / 1000), low: +c.low, high: +c.high, open: +c.open, close: +c.close }))
+    .filter(c => Number.isFinite(c.epoch) && Number.isFinite(c.low) && Number.isFinite(c.high) && Number.isFinite(c.open) && Number.isFinite(c.close));
+}
+
+// Pages backward from endEpoch until it either reaches startEpoch, runs out
+// of broker history, or hits a hard page cap. Returns whatever it managed to
+// collect (possibly a partial range) — the caller decides whether to
+// backfill the rest from Coinbase.
+async function _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress) {
+  const tf = EXNESS_BT_TF_MAP[granularity];
+  if (!tf || !LiveBroker.configured()) return null;
+
+  const expectedBars = Math.max(1, Math.ceil((endEpoch - startEpoch) / granularity));
+  const seen = new Set();
+  const collected = [];
+  let cursor = endEpoch;
+  let pages = 0;
+  const MAX_PAGES = 400; // 400 × 1000 M1 bars ≈ 9.2 months — comfortably past what MT crypto history usually holds
+
+  while (cursor > startEpoch && pages < MAX_PAGES) {
+    if (btCancelled) break;
+    pages++;
+    let page;
+    try {
+      page = await _fetchExnessBtPage(tf, cursor, 1000);
+    } catch (e) {
+      addSignal('warn', `Exness BT page failed: ${e.message}`, null);
+      break;
+    }
+    if (!page.length) break; // broker has no more history this far back
+
+    let oldestInPage = cursor;
+    for (const c of page) {
+      if (c.epoch < oldestInPage) oldestInPage = c.epoch;
+      if (c.epoch >= startEpoch && c.epoch <= endEpoch && !seen.has(c.epoch)) {
+        seen.add(c.epoch);
+        collected.push(c);
+      }
+    }
+    if (onProgress) onProgress(Math.min(collected.length, expectedBars), expectedBars);
+    if (oldestInPage >= cursor) break; // no progress this page — avoid an infinite loop
+    cursor = oldestInPage - granularity;
+  }
+
+  collected.sort((a, b) => a.epoch - b.epoch);
+  return { candles: collected, oldestCovered: collected.length ? collected[0].epoch : endEpoch };
+}
+
 async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
+  if (LiveBroker.configured() && EXNESS_BT_TF_MAP[granularity]) {
+    addSignal('info', 'BT: fetching history from Exness (MetaApi) first...', null);
+    btFetching = true;
+    let exOut = null;
+    try {
+      exOut = await _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress);
+    } catch (e) {
+      addSignal('warn', `Exness BT history failed: ${e.message} — using Coinbase for the full range`, null);
+    }
+    btFetching = false;
+
+    if (btCancelled) return exOut ? exOut.candles : [];
+
+    if (exOut && exOut.candles.length) {
+      // Exness covered the whole requested range (its oldest bar reaches at
+      // or before startEpoch) — no need to touch Coinbase at all.
+      if (exOut.oldestCovered <= startEpoch + granularity) {
+        addSignal('info', `${exOut.candles.length} M1 candles loaded from Exness (MetaApi) for backtest`, null);
+        return exOut.candles;
+      }
+      // Partial coverage — the broker's history runs out somewhere inside
+      // the requested range. Backfill everything older than that from
+      // Coinbase and merge the two.
+      const gapEnd = exOut.oldestCovered - granularity;
+      addSignal('info', `Exness history only reaches back to ${new Date(exOut.oldestCovered * 1000).toISOString().slice(0, 10)} — filling the rest from Coinbase`, null);
+      const cbFill = await _fetchCoinbaseBtCandles(granularity, startEpoch, gapEnd, onProgress);
+      const merged = cbFill.concat(exOut.candles);
+      merged.sort((a, b) => a.epoch - b.epoch);
+      const dedup = merged.filter((c, i, arr) => i === 0 || c.epoch !== arr[i - 1].epoch);
+      addSignal('info', `${exOut.candles.length} bars from Exness + ${cbFill.length} bars from Coinbase = ${dedup.length} total M1 candles`, null);
+      return dedup;
+    }
+    addSignal('warn', 'Exness returned no usable BT history — using Coinbase for the full range', null);
+  }
+  return _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProgress);
+}
+
+async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   // Fetches historical OHLC candles from Coinbase Exchange's public REST
   // /candles endpoint for backtest.
   //
@@ -11023,8 +11478,10 @@ setInterval(() => {
 
 addSignal('info','BTCUSD PA Bot v2 — Coinbase API data engine ready',null);
 
-addSignal('info','Strategy 1: Momentum Breakout + Quality Score Engine — M1 candle breaks N-bar range with strong body → regime/news/room/wick checks → 0-100 quality score graded B+/A/A+ | SL=structural HYBRID reference',null);
-addSignal('info','Strategy 2: EMA Pullback Continuation — runs only when Strategy 1 is silent, adds trades without cutting its frequency. M1 EMA9/21 trend → pullback-and-reclaim trigger → regime/news/room checks → 0-100 quality score | SL=structural swing reference',null);
+addSignal('info','Strategy 1: Momentum Breakout + Quality Score Engine — M1 candle breaks N-bar range with strong body → hard trend/overshoot/failed-break filters → regime/news/room/wick checks → 0-100 quality score graded B+/A/A+ | SL=structural HYBRID reference',null);
+addSignal('info','Strategy 2: EMA Pullback Continuation — M1 EMA9/21 trend → two-sided EMA touch + pullback-and-reclaim trigger → regime/news/room checks → 0-100 quality score | SL=structural swing reference',null);
+addSignal('info','Strategy 3: Range-Edge Rejection — RANGE-regime-only → bounded edge-sweep + wick rejection → 0-100 quality score | SL=structural range reference',null);
+addSignal('info','Strategy selection: all 3 strategies × both directions are evaluated every bar; the strongest valid setup by quality score fires — no strategy is prioritized just for being evaluated first.',null);
 </script>
 </body>
 </html>
