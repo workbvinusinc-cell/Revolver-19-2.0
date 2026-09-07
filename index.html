@@ -44,6 +44,9 @@ html,body{
   position:fixed;inset:0;z-index:9999;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:20px;
+  padding:32px 20px;box-sizing:border-box;
+  overflow-y:auto;overflow-x:hidden;
+  text-align:center;
   background:radial-gradient(ellipse at 50% 40%, var(--bg2) 0%, var(--bg) 75%);
   transition:opacity .5s ease, visibility .5s ease;
 }
@@ -61,7 +64,7 @@ html,body{
   text-transform:uppercase;
 }
 .revolver-wrap{
-  width:250px;height:auto;
+  width:min(250px,62vw);height:auto;margin:0 auto;
   filter:drop-shadow(0 4px 18px rgba(0,0,0,0.55)) drop-shadow(0 0 14px rgba(78,205,174,0.14));
 }
 .revolver-svg{width:100%;height:auto;overflow:visible}
@@ -124,7 +127,7 @@ html,body{
 .loading-step{
   font-family:var(--mono);font-size:11px;color:var(--text2);
   min-height:14px;letter-spacing:.03em;
-
+  transition:opacity .2s ease;
 }
 .loading-bar-track{
   width:220px;height:3px;border-radius:2px;overflow:hidden;
@@ -304,7 +307,7 @@ html,body{
   font-size:16px;line-height:1;padding:2px;transition:color .1s;
 }
 .drawer-close:hover{color:var(--text)}
-.drawer-body{flex:1;overflow-y:auto;padding:16px}
+.drawer-body{flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;scroll-behavior:smooth}
 .settings-section{margin-bottom:20px}
 .settings-section-title{
   font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--text3);
@@ -639,7 +642,7 @@ input[type=range]::-webkit-slider-thumb{
 <body>
 <div id="loadingScreen">
   <div class="revolver-wrap">
-    <svg viewBox="0 0 480 260" class="revolver-svg" aria-hidden="true">
+    <svg viewBox="27 17 480 260" class="revolver-svg" aria-hidden="true">
       <defs>
         <linearGradient id="steelGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#9a9aa6"/>
@@ -993,7 +996,7 @@ input[type=range]::-webkit-slider-thumb{
           <span>Live Trading</span>
           <input type="checkbox" id="cfgBrokerEnabled"/>
         </label>
-        <div class="field-hint" style="color:var(--red)">When ON: (1) every signal sends a real market order to Exness via MetaApi with real SL/TP, and (2) the price feed & candles switch from Coinbase to Exness's own live quotes for BTCUSDz. Run Test Connection first — it must show CONNECTED.</div>
+        <div class="field-hint" style="color:var(--red)">When ON: (1) every signal sends a real market order to Exness via MetaApi with real SL/TP, and (2) the price feed & candles switch from Coinbase to Exness's own live quotes for BTCUSDm. Run Test Connection first — it must show CONNECTED.</div>
       </div>
       <div class="field">
         <label>MetaApi Account ID</label>
@@ -1018,8 +1021,8 @@ input[type=range]::-webkit-slider-thumb{
       </div>
       <div class="field">
         <label>Symbol (exact spelling on your Exness server)</label>
-        <div class="field-row"><input class="finput" type="text" id="cfgBrokerSymbol" placeholder="BTCUSDz"/></div>
-        <div class="field-hint">Suffixes vary by server (BTCUSDz, BTCUSDm, BTCUSD.a...). Check Market Watch → Symbols in MT5. Your account's forex symbol suggests a "z" suffix on Exness-MT5Trial10.</div>
+        <div class="field-row"><input class="finput" type="text" id="cfgBrokerSymbol" placeholder="BTCUSDm" value="BTCUSDm"/></div>
+        <div class="field-hint">Suffixes vary by server (BTCUSDz, BTCUSDm, BTCUSD.a...). Check Market Watch → Symbols in MT5. Your current demo account (Exness-MT5Trail9) uses a "m" suffix.</div>
       </div>
       <div class="field-row" style="gap:8px;margin-top:2px;align-items:center">
         <button class="nav-btn" onclick="testBrokerConnection()">Test Connection</button>
@@ -1217,7 +1220,7 @@ input[type=range]::-webkit-slider-thumb{
           <span style="color:var(--gold);font-family:var(--sans);font-size:9px;font-weight:700;display:block;margin-bottom:3px">BTCUSD · Exness Raw Spread calibration</span>
           Spread: $2.5–$8 typical · Asian: ~$8 · NY/LON overlap: ~$3 · News spike: ~$18+ (Exness Raw Spread BTCUSD baseline)<br>
           Slippage: $0–$3 base, scaled up by order size and current volatility · Execution: 20–120 ms (simulated in both live and backtest fills) · Commission $4/lot round turn (Raw Spread) · Leverage and spread guard set above<br>
-          Swap: -$15.48/lot/day long, $0 short, tripled Friday (live Exness BTCUSDm spec) — only applies if a trade is held across a daily rollover<br>
+          Swap: -$16.39/lot/day long, $0 short, tripled Friday (live Exness BTCUSDm spec) — only applies if a trade is held across a daily rollover<br>
           Data: Coinbase WebSocket API BTC-USD (price feed) · lots adjust x0.60–x1.20 by news impact
         </div>
       </div>
@@ -1341,7 +1344,7 @@ input[type=range]::-webkit-slider-thumb{
     <div class="bt-summary-note">
       Replays your strategy on real historical BTCUSD data from Coinbase. Uses the identical momentum-breakout + quality-score engine and risk management as live mode — no data advantage, no repainting. M5 trend bias + M1 execution. Trades appear on chart during replay.<br><br>
       <span style="color:var(--gold);font-family:var(--sans);font-size:8px;font-weight:700;letter-spacing:.08em">MARKET SIMULATION ACTIVE:</span><br>
-      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $2.5–$8 typical, up to $18+ on news spikes (Exness Raw Spread BTCUSD) | Slippage: $0–$3 base, scaled up by order size and volatility | Execution delay: 20–120 ms, simulated on every fill | Commission: $4/lot round turn | Swap: -$15.48/lot/day long, tripled Friday (live Exness spec, only on trades held across rollover)
+      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $2.5–$8 typical, up to $18+ on news spikes (Exness Raw Spread BTCUSD) | Slippage: $0–$3 base, scaled up by order size and volatility | Execution delay: 20–120 ms, simulated on every fill | Commission: $4/lot round turn | Swap: -$16.39/lot/day long, tripled Friday (live Exness spec, only on trades held across rollover)
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Date Range (DD-MM-YYYY)</div>
@@ -1508,7 +1511,7 @@ const LiveBroker = {
   accountId: '',
   token: '',
   region: 'london',
-  symbol: 'BTCUSDz',
+  symbol: 'BTCUSDm',
   enabled: false,
   connectionStatus: 'UNKNOWN',
 
@@ -1604,7 +1607,7 @@ const LiveBroker = {
       this.accountId = saved.accountId || '';
       this.token     = saved.token || '';
       this.region    = saved.region || 'london';
-      this.symbol    = saved.symbol || 'BTCUSDz';
+      this.symbol    = saved.symbol || 'BTCUSDm';
       this.enabled   = !!saved.enabled;
     } catch (e) {}
   },
@@ -1694,18 +1697,19 @@ const CFG = {
   // gap-scan) applies it identically.
   COMMISSION_PER_LOT: 4.0,
   // ── Swap (overnight financing) ──
-  // Pulled directly from a live Exness BTCUSDm contract spec screen:
-  // Swap long -1548 points/day, swap short 0, tripled on Friday (crypto's
-  // weekend-cover day on Exness, vs. the usual Wednesday for forex). At
-  // digits=2 (POINT_SIZE=$0.01), that's -$15.48/lot/day long, $0 short,
-  // -$46.44/lot on the Friday rollover. Only matters for positions still
-  // open across a daily rollover (21:00 UTC, flat approximation — actual
-  // Exness rollover shifts to 22:00 UTC in winter DST) — this bot's trades
-  // are almost always scalps that close within the hour, so this will
-  // show as $0 on the vast majority of trades and only bite the rare
-  // multi-hour runner. Set SWAP_ENABLED false to strip it out entirely.
+  // Pulled directly from the live Exness BTCUSDm contract spec screen for
+  // this account: Swap long -1638.6 points/day, swap short 0, tripled on
+  // Friday (crypto's weekend-cover day on Exness, vs. the usual Wednesday
+  // for forex). At digits=2 (POINT_SIZE=$0.01), that's -$16.386/lot/day
+  // long, $0 short, -$49.16/lot on the Friday rollover. Only matters for
+  // positions still open across a daily rollover (21:00 UTC, flat
+  // approximation — actual Exness rollover shifts to 22:00 UTC in winter
+  // DST) — this bot's trades are almost always scalps that close within
+  // the hour, so this will show as $0 on the vast majority of trades and
+  // only bite the rare multi-hour runner. Set SWAP_ENABLED false to strip
+  // it out entirely.
   SWAP_ENABLED  : true,
-  SWAP_LONG_PTS : -1548,
+  SWAP_LONG_PTS : -1638.6,
   SWAP_SHORT_PTS: 0,
 };
 
@@ -2378,6 +2382,60 @@ function detectMarketRegime() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+//  15M MACRO REGIME — top of the 15M → 5M → 1M hierarchy.
+//  Provides directional BIAS (BULL/BEAR/NEUTRAL) plus a regime label reusing
+//  the same DEAD/EXPANSION/TREND/RANGE taxonomy as detectMarketRegime(),
+//  computed off candles[900] instead of candles[300].
+//
+//  This is CONTEXT ONLY. Nothing here hard-blocks a trade by default —
+//  evaluate() turns it into a soft score adjustment, the same way the
+//  existing M5 trend filter softly steers (rather than always blocking) M1
+//  entries today. 15M sets the preferred direction; it does not prevent a
+//  well-formed 5M/1M setup from firing against it.
+// ══════════════════════════════════════════════════════════════════════════
+let _macro15Cache = { arrRef: null, len: 0, lastClose: null, result: null };
+function detectMacroRegime15() {
+  const arr = (typeof candles !== "undefined") ? candles[900] : null;
+  if (!arr || arr.length < 15) return { bias: "NEUTRAL", regime: "UNKNOWN" };
+
+  const lastC = arr.length ? arr[arr.length - 1].close : null;
+  if (_macro15Cache.arrRef === arr && _macro15Cache.len === arr.length && _macro15Cache.lastClose === lastC) {
+    return _macro15Cache.result;
+  }
+
+  const completed = arr.slice(0, -1); // exclude forming 15M bar
+  const volatility = (typeof calculateVolatility === "function") ? calculateVolatility(900) : 0;
+  const last = completed[completed.length - 1];
+
+  let regime = "UNKNOWN", bias = "NEUTRAL";
+
+  if (last) {
+    const body = Math.abs(last.close - last.open);
+    regime = volatility < 0.5 ? "DEAD"
+           : body > volatility * 1.5 ? "EXPANSION"
+           : "RANGE"; // may be refined to TREND below once slope is known
+
+    const lookback = Math.min(12, completed.length); // ~3h of 15M bars
+    const window = completed.slice(-lookback);
+    if (window.length >= 6) {
+      const closes = window.map(c => c.close);
+      const slope = closes[closes.length - 1] - closes[0];
+      const highs = window.map(c => c.high);
+      const trendStrength = Math.abs(highs[highs.length - 1] - highs[0]);
+
+      if (regime === "RANGE" && trendStrength > volatility * 2) regime = "TREND";
+      bias = slope > volatility * 0.5 ? "BULL"
+           : slope < -volatility * 0.5 ? "BEAR"
+           : "NEUTRAL";
+    }
+  }
+
+  const result = { bias, regime };
+  _macro15Cache = { arrRef: arr, len: arr.length, lastClose: lastC, result };
+  return result;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 //  STRATEGY ENGINE — REFINED LIQUIDITY / STRUCTURE ENGINE (v2)
 //  Replaces the original ICT/SMC pattern-detection engine.
 //  Signal-detection logic ONLY — the bot's existing gate system,
@@ -2475,6 +2533,37 @@ const REFINED_STRATEGY_CFG = {
     // checks below are doing more of the false-entry filtering, so room-to-
     // run no longer needs to carry as much of that burden alone.
     minRoomATR: 0.30
+  },
+
+  // ---------- 15M macro context (top of the 15M→5M→1M hierarchy) ----------
+  // Context only, per design: sets the preferred direction and adds/removes
+  // score points below (see macroScore in evaluate()). Never a hard block —
+  // a strong 5M/1M setup against the 15M bias can still fire, it just has
+  // to earn its way to threshold without the alignment bonus.
+  macro15: {
+    enabled: true,
+    biasScoreWeight: 15   // max points contributed to scoreTotal when aligned
+  },
+
+  // ---------- 5M setup engine ----------
+  // Promotes 5M from "context only" to an actual tradable timeframe. Scans
+  // the last few COMPLETED 5M bars (not just the newest) for a
+  // breakout-of-range trigger, mirroring the M1 trigger one level up.
+  // A fresh, aligned 5M setup (a) boosts a matching M1 execution's score
+  // via m5Bonus below, and (b) — if strong and fresh enough — can fire on
+  // its own through the fast lane in evaluate(), without waiting on a
+  // separate M1 pattern. This is what lets the bot actively trade BOTH 5M
+  // and 1M instead of 5M being pure context.
+  m5Setup: {
+    enabled: true,
+    lookbackBars: 8,       // M5 range lookback for the breakout trigger
+    minBodyRatio: 0.30,
+    windowBars: 4,          // how many completed M5 bars back a setup still
+                             // counts as "fresh" for the M1 confirmation bonus
+    minScoreForWindow: 55,  // min 5M setup score to grant the M1 bonus at all
+    bonusPoints: 12,        // score bonus applied to a matching, fresh M1 trigger
+    fastLaneScore: 82,      // min 5M setup score to qualify for fast-lane entry
+    fastLaneMaxBarsAgo: 1   // fast lane only while the setup is this fresh (M5 bars)
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -3641,6 +3730,67 @@ const RefinedStrategy = (() => {
   // below are UNCHANGED — this only touches signal detection, so the
   // bot's risk management still works exactly as before.
   // ─────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 5M SETUP ENGINE — scans the last few completed M5 bars for a
+  // breakout-of-range trigger on the 5M timeframe itself. Purely a scan
+  // over history already available on every tick, so it needs no
+  // persistent state and stays fully backtestable bar-by-bar (walk-forward
+  // / mini-backtest replay works unchanged).
+  //
+  // Returns { found:false } when nothing qualifies, or
+  // { found:true, barsAgo, score, bar, priorHigh, priorLow } for the
+  // strongest qualifying bar within the scan window. barsAgo = 0 means the
+  // most recently completed M5 bar.
+  // ─────────────────────────────────────────────────────────────────────
+  function detect5MSetup(direction, m5, macro) {
+    const isBuy = direction === "BUY";
+    const cfg = C.m5Setup || {};
+    const lookback = cfg.lookbackBars || 8;
+    const minBody  = cfg.minBodyRatio != null ? cfg.minBodyRatio : 0.30;
+    const scanBars = Math.max(1, cfg.windowBars || 4);
+
+    const completed = normalizeCandles(m5).slice(0, -1); // drop forming M5 bar
+    if (completed.length < lookback + scanBars + 2) return { found: false };
+
+    let best = null;
+
+    for (let barsAgo = 0; barsAgo <= scanBars; barsAgo++) {
+      const idx = completed.length - 1 - barsAgo;
+      const bar = completed[idx];
+      if (!bar) continue;
+      const priorWindow = completed.slice(Math.max(0, idx - lookback), idx);
+      if (priorWindow.length < Math.min(lookback, 5)) continue;
+
+      const priorHigh = highest(priorWindow, 0, priorWindow.length - 1);
+      const priorLow  = lowest(priorWindow, 0, priorWindow.length - 1);
+      const br = range(bar);
+      const bRatio = br > 0 ? Math.abs(bar.close - bar.open) / br : 0;
+
+      const brokeUp   = bar.close > priorHigh;
+      const brokeDown = bar.close < priorLow;
+      const fired = isBuy ? (brokeUp && bRatio >= minBody) : (brokeDown && bRatio >= minBody);
+      if (!fired) continue;
+
+      const barATR = atr(completed.slice(0, idx + 1), 14) || br;
+      const overshoot = isBuy ? (bar.close - priorHigh) : (priorLow - bar.close);
+      const overshootATR = barATR > 0 ? clamp(overshoot / barATR, 0, 1) : 0;
+
+      const macroAligned = macro && ((isBuy && macro.bias === "BULL") || (!isBuy && macro.bias === "BEAR"));
+      const macroOpposed = macro && ((isBuy && macro.bias === "BEAR") || (!isBuy && macro.bias === "BULL"));
+
+      const score = clamp(bRatio, 0, 1) * 40
+                  + overshootATR * 25
+                  + (macroAligned ? 20 : macroOpposed ? 0 : 10)
+                  + clamp(1 - barsAgo / (scanBars + 1), 0, 1) * 15; // freshness
+
+      const candidate = { found: true, barsAgo, score: clamp(score, 0, 100), bar, priorHigh, priorLow };
+      if (!best || candidate.score > best.score) best = candidate;
+    }
+
+    return best || { found: false };
+  }
+
   function evaluate(direction, price, candleSets) {
     const isBuy = direction === "BUY";
 
@@ -3674,6 +3824,30 @@ const RefinedStrategy = (() => {
     // while still keeping the bot's core edge, which is trend alignment. ──
     const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
     const counterTrend = trend !== "NONE" && ((isBuy && trend === "BEAR") || (!isBuy && trend === "BULL"));
+
+    // ── 15M MACRO CONTEXT — top of the 15M→5M→1M hierarchy. Context only:
+    // contributes score points below, never a hard block (see macro15.
+    // config comment). ──
+    const macro = (C.macro15 && C.macro15.enabled && typeof detectMacroRegime15 === "function")
+      ? detectMacroRegime15()
+      : { bias: "NONE", regime: "UNKNOWN" };
+    const macroAligned = (isBuy && macro.bias === "BULL") || (!isBuy && macro.bias === "BEAR");
+    const macroOpposed = (isBuy && macro.bias === "BEAR") || (!isBuy && macro.bias === "BULL");
+
+    // ── 5M SETUP ENGINE — an independent 5M breakout scan. A fresh, aligned
+    // result boosts a matching M1 trigger's score (m5Bonus below) and, if
+    // strong/fresh enough, can fire on its own via the fast lane — this is
+    // what makes the 5M timeframe actually tradable, not just context. ──
+    const m5setup = (C.m5Setup && C.m5Setup.enabled)
+      ? detect5MSetup(direction, m5, macro)
+      : { found: false };
+    const m5Fresh = m5setup.found
+      && m5setup.barsAgo <= C.m5Setup.windowBars
+      && m5setup.score >= C.m5Setup.minScoreForWindow;
+    const fastLaneEligible = m5setup.found
+      && m5setup.score >= C.m5Setup.fastLaneScore
+      && m5setup.barsAgo <= C.m5Setup.fastLaneMaxBarsAgo
+      && !macroOpposed;
 
     // ── HARD TREND FILTER ── when the HTF trend filter is active and this
     // setup runs against it, reject it outright rather than merely scoring
@@ -3717,7 +3891,13 @@ const RefinedStrategy = (() => {
       ? (brokeUp && bodyRatio >= C.simple.minBodyRatio)
       : (brokeDown && bodyRatio >= C.simple.minBodyRatio);
 
-    if (!triggered) {
+    // ── FAST LANE — a strong, fresh 5M setup can substitute for the M1
+    // breakout trigger itself. This is the only place a 5M-sourced trade
+    // skips the M1 pattern requirement; every other gate below (regime,
+    // news, room, wick) still applies, so risk controls are unchanged. ──
+    const fastLane = !triggered && fastLaneEligible;
+
+    if (!triggered && !fastLane) {
       return {
         signal: false,
         reason: isBuy ? "NO_UPSIDE_BREAKOUT" : "NO_DOWNSIDE_BREAKOUT",
@@ -3733,16 +3913,18 @@ const RefinedStrategy = (() => {
     // ── BREAKOUT OVERSHOOT PROTECTION — measure how far the breakout candle
     // closed past the range edge it broke, in ATR terms. Too little and the
     // breakout is too weak to trust; too much and price has already run so
-    // far that entering now means chasing an extended move. ──
+    // far that entering now means chasing an extended move. Skipped in fast
+    // lane: there the M1 candle didn't actually break out — the 5M setup is
+    // the trigger, and it was already scored on its own overshoot. ──
     const breakoutOvershoot = isBuy ? (last.close - recentHigh) : (recentLow - last.close);
     const breakoutOvershootATR = currentATR > 0 ? breakoutOvershoot / currentATR : 0;
-    if (breakoutOvershootATR < C.simple.minBreakoutATR) {
+    if (!fastLane && breakoutOvershootATR < C.simple.minBreakoutATR) {
       return {
         signal: false, reason: "BREAKOUT_TOO_WEAK", direction, trend, quality: null,
         gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
       };
     }
-    if (breakoutOvershootATR > C.simple.maxChaseATR) {
+    if (!fastLane && breakoutOvershootATR > C.simple.maxChaseATR) {
       return {
         signal: false, reason: "BREAKOUT_OVEREXTENDED_CHASE", direction, trend, quality: null,
         gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
@@ -3827,7 +4009,12 @@ const RefinedStrategy = (() => {
     // position size, and trail behavior.
     const overshoot = isBuy ? (last.close - recentHigh) : (recentLow - last.close);
     const overshootATR = currentATR > 0 ? clamp(overshoot / currentATR, 0, 1) : 0;
-    const breakoutScore = clamp(bodyRatio, 0, 1) * 30 + overshootATR * 15;         // up to 45
+    // Fast-lane entries didn't come from an M1 breakout candle, so score
+    // them off the 5M setup's own strength instead of a possibly-unremarkable
+    // M1 candle.
+    const breakoutScore = fastLane
+      ? clamp((m5setup.score || 0) / 100, 0, 1) * 45                                // up to 45
+      : clamp(bodyRatio, 0, 1) * 30 + overshootATR * 15;                            // up to 45
 
     const aligned = (isBuy && trend === "BULL") || (!isBuy && trend === "BEAR");
     const trendScore = trend === "NONE" ? 12 : (aligned ? 25 : 0);                  // up to 25
@@ -3838,6 +4025,22 @@ const RefinedStrategy = (() => {
     const roomScore = Number.isFinite(roomATR)
       ? clamp(roomATR / 3, 0, 1) * 15
       : 15;                                                                         // up to 15
+
+    // ── 15M macro alignment — soft bonus only (see macro15 config). ──
+    const macroScore = !C.macro15 || !C.macro15.enabled ? 0
+      : macroAligned ? C.macro15.biasScoreWeight
+      : macroOpposed ? 0
+      : C.macro15.biasScoreWeight * 0.4;                                           // up to macro15.biasScoreWeight
+
+    // ── 5M confirmation bonus — rewards an M1 trigger that lines up with a
+    // fresh, independently-valid 5M setup, without loosening the M1 trigger
+    // itself. This is the "redesign the filters, don't just lower the bar"
+    // mechanism: healthy-confluence trades clear threshold more easily,
+    // isolated M1 noise still has to earn it on its own. Not applied in fast
+    // lane (breakoutScore already carries the 5M strength there). ──
+    const m5Bonus = (!fastLane && m5Fresh)
+      ? C.m5Setup.bonusPoints * clamp(1 - (m5setup.barsAgo / (C.m5Setup.windowBars + 1)), 0.3, 1)
+      : 0;                                                                          // up to m5Setup.bonusPoints
 
     // ── Wick-rejection penalty — a breakout candle that closes strongly but
     // leaves a large wick on the OPPOSITE side (e.g. a bull breakout with a
@@ -3870,7 +4073,10 @@ const RefinedStrategy = (() => {
 
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;                   // 0 to -11
 
-    const scoreTotal = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
+    const scoreTotal = clamp(
+      breakoutScore + trendScore + regimeScore + roomScore + macroScore + m5Bonus - wickPenalty,
+      0, 100
+    );
 
     // ── Approval — raised again per explicit request: the bot must never
     // take a 1-star or 2-star (B+) trade, only 3-star (A / A+) setups.
@@ -3901,45 +4107,79 @@ const RefinedStrategy = (() => {
                 : "B+";
 
     // Minimal stand-ins for the structure objects the (unchanged) trade
-    // geometry / UI code expects — built off the breakout candle and the
-    // range it broke, not off any ICT sweep/BMS/OB detection anymore.
-    const sweep = {
-      type: isBuy ? "SIMPLE_RANGE_LOW" : "SIMPLE_RANGE_HIGH",
-      level: isBuy ? recentLow : recentHigh,
-      candle: { low: recentLow, high: recentHigh },
-      epoch: last.epoch,
-      quality: 50
-    };
-    const bms = { level: isBuy ? recentLow : recentHigh, direction, candle: last };
-    const ob  = {
-      low:  Math.min(last.open, last.close),
-      high: Math.max(last.open, last.close),
-      epoch: last.epoch
-    };
-    const zone = {
-      min: Math.min(last.open, last.close),
-      max: Math.max(last.open, last.close),
-      center: last.close,
-      source: "SIMPLE_TRIGGER_CANDLE"
-    };
+    // geometry / UI code expects. Standalone/M5-confirmed M1 trades build
+    // these off the M1 breakout candle and the range it broke, same as
+    // before. Fast-lane (5M-sourced) trades build them off the 5M setup bar
+    // and its prior range instead — a fast-lane entry didn't come from an
+    // M1 structural break, so its stop should reflect 5M structure, not an
+    // arbitrary M1 candle.
+    const sweep = fastLane
+      ? {
+          type: isBuy ? "M5_RANGE_LOW" : "M5_RANGE_HIGH",
+          level: isBuy ? m5setup.priorLow : m5setup.priorHigh,
+          candle: { low: m5setup.priorLow, high: m5setup.priorHigh },
+          epoch: m5setup.bar.epoch,
+          quality: m5setup.score
+        }
+      : {
+          type: isBuy ? "SIMPLE_RANGE_LOW" : "SIMPLE_RANGE_HIGH",
+          level: isBuy ? recentLow : recentHigh,
+          candle: { low: recentLow, high: recentHigh },
+          epoch: last.epoch,
+          quality: 50
+        };
+    const bms = fastLane
+      ? { level: isBuy ? m5setup.priorLow : m5setup.priorHigh, direction, candle: m5setup.bar }
+      : { level: isBuy ? recentLow : recentHigh, direction, candle: last };
+    const ob = fastLane
+      ? {
+          low:  Math.min(m5setup.bar.open, m5setup.bar.close),
+          high: Math.max(m5setup.bar.open, m5setup.bar.close),
+          epoch: m5setup.bar.epoch
+        }
+      : {
+          low:  Math.min(last.open, last.close),
+          high: Math.max(last.open, last.close),
+          epoch: last.epoch
+        };
+    const zone = fastLane
+      ? {
+          min: Math.min(m5setup.bar.open, m5setup.bar.close),
+          max: Math.max(m5setup.bar.open, m5setup.bar.close),
+          center: m5setup.bar.close,
+          source: "M5_FAST_LANE_BAR"
+        }
+      : {
+          min: Math.min(last.open, last.close),
+          max: Math.max(last.open, last.close),
+          center: last.close,
+          source: "SIMPLE_TRIGGER_CANDLE"
+        };
+    const source = fastLane ? "M5_FAST_LANE" : (m5Fresh ? "M1_CONFIRMED_BY_M5" : "M1_STANDALONE");
     const quality = {
       total: scoreTotal,
       grade,
       approved: true,
-      components: { breakout: breakoutScore, trend: trendScore, regime: regimeScore, room: roomScore, wickPenalty }
+      components: {
+        breakout: breakoutScore, trend: trendScore, regime: regimeScore, room: roomScore,
+        macro: macroScore, m5Bonus, wickPenalty
+      }
     };
 
     return {
       signal: true,
       direction,
-      reason: counterTrend ? "SIMPLE_MOMENTUM_BREAKOUT_COUNTERTREND" : "SIMPLE_MOMENTUM_BREAKOUT",
-      trend, counterTrend,
+      reason: fastLane
+        ? "M5_FAST_LANE_ENTRY"
+        : (counterTrend ? "SIMPLE_MOMENTUM_BREAKOUT_COUNTERTREND"
+                        : (m5Fresh ? "M1_BREAKOUT_M5_CONFIRMED" : "SIMPLE_MOMENTUM_BREAKOUT")),
+      trend, counterTrend, macro, source, fastLane, m5setup: m5setup.found ? m5setup : null,
       sweep, bms, ob, fvg: null, zone, quality,
       setupAgeMinutes: 0,
       expired: false,
       gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: true, quality: true },
       entryModel: {
-        type: "SIMPLE_MOMENTUM_BREAKOUT",
+        type: fastLane ? "M5_FAST_LANE" : "SIMPLE_MOMENTUM_BREAKOUT",
         zoneMin: zone.min,
         zoneMax: zone.max,
         center: zone.center
@@ -4022,8 +4262,25 @@ const RefinedStrategy = (() => {
     const oppWickRatio = barRange > 0 ? clamp(oppWick / barRange, 0, 1) : 0;
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;
 
-    const score = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
-    return { score, trend, counterTrend, regime, ready: true };
+    // Mirrors evaluate()'s macro/5M-bonus terms so the live gauge tracks the
+    // same number that actually gates entries, not a stale subset of it.
+    const macro = (C.macro15 && C.macro15.enabled && typeof detectMacroRegime15 === "function")
+      ? detectMacroRegime15() : { bias: "NONE", regime: "UNKNOWN" };
+    const macroAligned = (isBuy && macro.bias === "BULL") || (!isBuy && macro.bias === "BEAR");
+    const macroOpposed = (isBuy && macro.bias === "BEAR") || (!isBuy && macro.bias === "BULL");
+    const macroScore = !C.macro15 || !C.macro15.enabled ? 0
+      : macroAligned ? C.macro15.biasScoreWeight
+      : macroOpposed ? 0
+      : C.macro15.biasScoreWeight * 0.4;
+
+    const m5setup = (C.m5Setup && C.m5Setup.enabled) ? detect5MSetup(direction, m5, macro) : { found: false };
+    const m5Fresh = m5setup.found && m5setup.barsAgo <= C.m5Setup.windowBars && m5setup.score >= C.m5Setup.minScoreForWindow;
+    const m5Bonus = m5Fresh
+      ? C.m5Setup.bonusPoints * clamp(1 - (m5setup.barsAgo / (C.m5Setup.windowBars + 1)), 0.3, 1)
+      : 0;
+
+    const score = clamp(breakoutScore + trendScore + regimeScore + roomScore + macroScore + m5Bonus - wickPenalty, 0, 100);
+    return { score, trend, counterTrend, regime, macro, m5setup: m5setup.found ? m5setup : null, ready: true };
   }
 
 
@@ -7998,7 +8255,7 @@ function loadSettings() {
   $('cfgBrokerAccountId').value  = LiveBroker.accountId;
   $('cfgBrokerToken').value      = LiveBroker.token;
   $('cfgBrokerRegion').value     = LiveBroker.region || 'london';
-  $('cfgBrokerSymbol').value     = LiveBroker.symbol || 'BTCUSDz';
+  $('cfgBrokerSymbol').value     = LiveBroker.symbol || 'BTCUSDm';
   updateModeBadge();
 }
 
@@ -8008,7 +8265,7 @@ async function testBrokerConnection() {
   LiveBroker.accountId = $('cfgBrokerAccountId').value.trim();
   LiveBroker.token     = $('cfgBrokerToken').value.trim();
   LiveBroker.region    = $('cfgBrokerRegion').value;
-  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDz';
+  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDm';
   try {
     const info = await LiveBroker.testConnection();
     const ok = info.connectionStatus === 'CONNECTED';
@@ -8090,7 +8347,7 @@ function saveSettings() {
   LiveBroker.accountId = $('cfgBrokerAccountId').value.trim();
   LiveBroker.token     = $('cfgBrokerToken').value.trim();
   LiveBroker.region    = $('cfgBrokerRegion').value;
-  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDz';
+  LiveBroker.symbol    = $('cfgBrokerSymbol').value.trim() || 'BTCUSDm';
   const feedSourceChanged = LiveBroker.enabled !== _brokerEnabledBeforeSave;
   LiveBroker.save();
   updateModeBadge();
@@ -8561,7 +8818,7 @@ function _handleCoinbaseMsg(msg) {
 // ── EXNESS LIVE FEED ENGINE (via MetaApi) ──────────────────────────────────
 // Used instead of the Coinbase feed whenever Live Trading is on, so the
 // price the bot reacts to matches the price your broker is actually quoting
-// (Exness's BTCUSDz can drift from Coinbase's BTC-USD, especially spread and
+// (Exness's BTCUSDm can drift from Coinbase's BTC-USD, especially spread and
 // during volatile moves). This is REST polling, not a true tick-by-tick
 // WebSocket stream — MetaApi's real streaming API uses a stateful
 // socket.io-based synchronization protocol meant for their Node/Python SDK,
@@ -8718,12 +8975,16 @@ function connect(onStep) {
 // logic and signal feed warnings take over from there.
 async function bootApp() {
   const stepEl = document.getElementById('loadingStep');
-  const setStep = text => { if (stepEl) stepEl.textContent = text; };
+  const setStep = text => {
+    if (!stepEl) return;
+    stepEl.style.opacity = '0';
+    setTimeout(() => { stepEl.textContent = text; stepEl.style.opacity = '1'; }, 200);
+  };
 
   setStep('Initializing...');
 
   const connectedPromise = new Promise(resolve => { _bootConnResolvers.push(resolve); });
-  connect(setStep);
+  try { connect(setStep); } catch (err) { console.error('connect() failed during boot:', err); }
 
   await Promise.race([connectedPromise, new Promise(r => setTimeout(r, 15000))]);
 
@@ -8733,12 +8994,14 @@ async function bootApp() {
   }
 
   setStep('Ready');
-  drawChart();
+  try { drawChart(); } catch (err) { console.error('drawChart() failed during boot:', err); }
   await new Promise(r => setTimeout(r, 300));
   revealApp();
 }
 
+let _appRevealed = false;
 function revealApp() {
+  _appRevealed = true;
   const loadingScreen = document.getElementById('loadingScreen');
   const app = document.querySelector('.app');
   if (app) app.classList.add('app-ready');
@@ -11607,7 +11870,13 @@ loadSettings();
 updateProfitLockUI();
 setBtToday();
 Storage.init().catch(() => {});
-bootApp();
+bootApp().catch(err => {
+  console.error('Boot sequence failed — revealing UI in a fallback state:', err);
+  revealApp();
+});
+// Absolute failsafe: whatever goes wrong above, the UI must never stay
+// invisible indefinitely.
+setTimeout(() => { if (!_appRevealed) revealApp(); }, 20000);
 setInterval(drawChart, 1000);
 setInterval(updateStatsStrip, 3000);
 setInterval(()=>{ if(demoPositions.length) updateDemoPositionsUI(); }, 2000);
