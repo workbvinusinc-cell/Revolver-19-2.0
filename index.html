@@ -975,6 +975,56 @@ input[type=range]::-webkit-slider-thumb{
       </div>
       <div class="gate-note">Counter-trend setups (against the M5 trend bias above) must clear the higher A-grade floor instead of B+.</div>
     </div>
+    <div class="settings-section">
+      <div class="settings-section-title">BUY Setup — Strategy 2: EMA Pullback Continuation</div>
+      <div class="conds" id="pullbackBuyConds">
+        <div class="cond" data-k="pTrend"><span class="ci no">○</span>G1: M1 EMA9/21 Trend = BULL (fast EMA separated above slow by min ATR distance)</div>
+        <div class="cond" data-k="pTrigger"><span class="ci no">○</span>G2: Pullback-and-Reclaim Trigger — candle touches EMA zone then closes back above it with a strong body</div>
+        <div class="cond" data-k="pRegime"><span class="ci no">○</span>G3: Market Regime OK (not DEAD / no-volatility)</div>
+        <div class="cond" data-k="pNews"><span class="ci no">○</span>G4: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="pRoom"><span class="ci no">○</span>G5: Room-To-Run Scored (feeds quality score — no room does not veto the trade)</div>
+        <div class="cond" data-k="pEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor → SIGNAL</div>
+      </div>
+      <div class="gate-note">Runs alongside Strategy 1 — never in place of it. Only trades WITH the established M1 EMA trend, so it never fires a counter-trend setup.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">SELL Setup — Strategy 2: EMA Pullback Continuation</div>
+      <div class="conds" id="pullbackSellConds">
+        <div class="cond" data-k="qTrend"><span class="ci no">○</span>G1: M1 EMA9/21 Trend = BEAR (fast EMA separated below slow by min ATR distance)</div>
+        <div class="cond" data-k="qTrigger"><span class="ci no">○</span>G2: Pullback-and-Reclaim Trigger — candle touches EMA zone then closes back below it with a strong body</div>
+        <div class="cond" data-k="qRegime"><span class="ci no">○</span>G3: Market Regime OK (not DEAD / no-volatility)</div>
+        <div class="cond" data-k="qNews"><span class="ci no">○</span>G4: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="qRoom"><span class="ci no">○</span>G5: Room-To-Run Scored (feeds quality score — no room does not veto the trade)</div>
+        <div class="cond" data-k="qEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor → SIGNAL</div>
+      </div>
+      <div class="gate-note">Runs alongside Strategy 1 — never in place of it. Only trades WITH the established M1 EMA trend, so it never fires a counter-trend setup.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">BUY Setup — Strategy 3: Range-Edge Rejection</div>
+      <div class="conds" id="rangeBuyConds">
+        <div class="cond" data-k="rRange"><span class="ci no">○</span>G1: Range Shape Confirmed — recent M1 channel is bounded (sized between min/max ATR)</div>
+        <div class="cond" data-k="rTrigger"><span class="ci no">○</span>G2: Edge Sweep + Wick Rejection Trigger — low sweeps range floor with a long lower wick, then closes back inside</div>
+        <div class="cond" data-k="rRegime"><span class="ci no">○</span>G3: Market Regime = RANGE (hard gate — only ever fires in a genuine range, unlike Strategy 1/2's soft regime check)</div>
+        <div class="cond" data-k="rNews"><span class="ci no">○</span>G4: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="rEntry"><span class="ci no">○</span>G5: Quality Score ≥ Grade Floor → SIGNAL</div>
+      </div>
+      <div class="gate-note">A third, independent signal source — only ever evaluated on a tick where both Strategy 1 and Strategy 2 found nothing to fire on.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">SELL Setup — Strategy 3: Range-Edge Rejection</div>
+      <div class="conds" id="rangeSellConds">
+        <div class="cond" data-k="zRange"><span class="ci no">○</span>G1: Range Shape Confirmed — recent M1 channel is bounded (sized between min/max ATR)</div>
+        <div class="cond" data-k="zTrigger"><span class="ci no">○</span>G2: Edge Sweep + Wick Rejection Trigger — high sweeps range ceiling with a long upper wick, then closes back inside</div>
+        <div class="cond" data-k="zRegime"><span class="ci no">○</span>G3: Market Regime = RANGE (hard gate — only ever fires in a genuine range, unlike Strategy 1/2's soft regime check)</div>
+        <div class="cond" data-k="zNews"><span class="ci no">○</span>G4: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="zEntry"><span class="ci no">○</span>G5: Quality Score ≥ Grade Floor → SIGNAL</div>
+      </div>
+      <div class="gate-note">A third, independent signal source — only ever evaluated on a tick where both Strategy 1 and Strategy 2 found nothing to fire on.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">How a trade actually gets picked</div>
+      <div class="gate-note" style="padding-left:0">Every M1 candle close, all six candidates above (S1/S2/S3 × BUY/SELL) are evaluated. Any that clear every gate for their own strategy become eligible; the eligible candidate with the single highest 0–100 quality score is the one that fires — so a high-quality Strategy 2 or 3 setup can outrank a weaker Strategy 1 breakout, and vice versa. Only one trade is opened per signal. The chart's top-left gate-pill overlay always shows whichever of the six candidates has progressed furthest, labeled with the strategy it belongs to.</div>
+    </div>
   </div>
 </div>
 
@@ -2108,13 +2158,27 @@ let btFetching = false;
 // Tries the direct URL first; falls back to corsproxy.io if the request
 // fails (CORS block, server unavailable, etc.). Resolves to parsed JSON
 // or throws if both attempts fail.
+// BUG FIX: neither the direct request nor the corsproxy.io fallback had a
+// timeout. A request that stalls (no error, no response — common with
+// corsproxy.io under load, or a network that silently drops the connection)
+// left this `await` pending forever. Since fetchNewsForBacktest calls this
+// once per week in the backtest range, one stuck request anywhere in that
+// sequence froze the ENTIRE backtest permanently right after the candle
+// fetch completed — candles loaded, but replay never started, with no error
+// shown. Both attempts now abort after 8s so a hung request fails fast
+// instead of hanging the whole run.
 async function _fetchJSON(url) {
+  const withTimeout = (u, ms) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(u, { cache: 'no-store', signal: controller.signal }).finally(() => clearTimeout(timer));
+  };
   try {
-    const r = await fetch(url, { cache: 'no-store' });
+    const r = await withTimeout(url, 8000);
     if (r.ok) return r.json();
   } catch (_) {}
   // Proxy fallback
-  const r2 = await fetch('https://corsproxy.io/?' + encodeURIComponent(url), { cache: 'no-store' });
+  const r2 = await withTimeout('https://corsproxy.io/?' + encodeURIComponent(url), 8000);
   if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
   return r2.json();
 }
@@ -6198,6 +6262,46 @@ const strategy = {
   evalSell3(price) { return this._eval3('SELL', price); },
 };
 
+// ── UNIFIED GATE CHAIN — ONE place that knows how many gates each of the
+// three strategies has and what they're called, so every place that shows
+// "how close is this setup to firing" (chart overlay, signal-feed progress
+// log) reads from the same source and can never drift out of sync with the
+// actual evaluate() logic above.
+//   S1 Momentum Breakout : TRIG → REGIME → NEWS → ROOM → WICK → QUAL  (6)
+//   S2 EMA Pullback       : TREND → TRIG → REGIME → NEWS → ROOM → QUAL (6)
+//   S3 Range-Edge Reject. : RANGE → TRIG → REGIME → NEWS → QUAL        (5)
+// QUAL is always the final "did it actually fire" gate — for S1 that's the
+// same as g.quality; for S2/S3, evaluate() doesn't expose a separate quality
+// boolean (a QUALITY_BELOW_FLOOR rejection still returns every earlier gate
+// as true), so QUAL here is synthesized from the top-level `signal` flag,
+// which is only true once the quality floor is also cleared.
+function buildGateChain(key, evalRes) {
+  const g = (evalRes && evalRes.raw && evalRes.raw.gates) || {};
+  const signal = !!(evalRes && evalRes.signal);
+  let stratLabel, labels, values;
+  if (key.startsWith('S1')) {
+    stratLabel = 'S1 · Momentum Breakout';
+    labels = ['TRIG', 'REGIME', 'NEWS', 'ROOM', 'WICK', 'QUAL'];
+    values = [!!g.trigger, !!g.regimeOk, !!g.newsOk, !!g.roomOk, !!g.wickOk, signal];
+  } else if (key.startsWith('S2')) {
+    stratLabel = 'S2 · EMA Pullback';
+    labels = ['TREND', 'TRIG', 'REGIME', 'NEWS', 'ROOM', 'QUAL'];
+    values = [!!g.trend, !!g.trigger, !!g.regimeOk, !!g.newsOk, !!g.roomOk, signal];
+  } else {
+    stratLabel = 'S3 · Range-Edge';
+    labels = ['RANGE', 'TRIG', 'REGIME', 'NEWS', 'QUAL'];
+    values = [!!g.rangeShape, !!g.trigger, !!g.regimeOk, !!g.newsOk, signal];
+  }
+  const passed = values.filter(Boolean).length;
+  return {
+    key, stratLabel, labels, values,
+    isBuy: key.endsWith('BUY'),
+    passed, total: values.length,
+    ratio: passed / values.length,
+    signal,
+    qualityScore: evalRes ? evalRes.qualityScore : null,
+  };
+}
 
 function drawChart(overridePositions = null, overrideMid = null) {
   const W = cv.width / DPR, H = cv.height / DPR;
@@ -6366,43 +6470,55 @@ function drawChart(overridePositions = null, overrideMid = null) {
     ctx.textAlign='left';
     ctx.fillText(label, labelX + 4, labelY);
   }
-  // ── GATE PROGRESS OVERLAY — shows which gates have fired for live setup ──
-  // Renders a compact vertical pill in the top-left corner of the chart.
-  // Gates: G1=Momentum Trigger G2=Regime G3=News G4=Room G5=Wick G6=Quality-approved
-  // (matches the live RefinedStrategy.evaluate() checks exactly — no ICT/SMC
-  // concepts here; those only exist in the separate cosmetic chart-zone
-  // drawing below, which does not feed this overlay or the settings gauge.)
-  // Color: green = passed, dark = pending, gold outline = signal firing
+  // ── GATE PROGRESS OVERLAY — shows which gates have fired for the live
+  // setup that's currently furthest along, ACROSS ALL THREE STRATEGIES.
+  // Renders a compact row of pills in the top-left corner of the chart, plus
+  // a header naming which strategy is being shown — since each strategy has
+  // a different number/name of gates (see buildGateChain above), the pills
+  // themselves change shape depending on which one is leading. This is the
+  // same six-candidate set runStrategy() ranks by quality score, so what you
+  // see here is always the setup closest to actually producing the next
+  // trade — never just Strategy 1's chain regardless of what's really moving.
+  // Color: green/red = passed (buy/sell), dark = pending, gold outline = firing
   (function drawGateOverlay() {
-    const bs = strategy.evalBuy(mid);
-    const ss = strategy.evalSell(mid);
+    const chains = [
+      buildGateChain('S1_BUY',  strategy.evalBuy(mid)),
+      buildGateChain('S1_SELL', strategy.evalSell(mid)),
+      buildGateChain('S2_BUY',  strategy.evalBuy2(mid)),
+      buildGateChain('S2_SELL', strategy.evalSell2(mid)),
+      buildGateChain('S3_BUY',  strategy.evalBuy3(mid)),
+      buildGateChain('S3_SELL', strategy.evalSell3(mid)),
+    ];
+    // Furthest-progressed chain wins the display slot; ties broken by
+    // quality score so a stronger setup is shown over a weaker one that
+    // merely reached the same gate count first.
+    chains.sort((a, b) => (b.ratio - a.ratio) || ((b.qualityScore || 0) - (a.qualityScore || 0)));
+    const lead = chains[0];
+    if (!lead || lead.passed === 0) return;
 
-    // Pick the setup that's progressed furthest
-    const bGates = [bs.conds.bSweep, bs.conds.bBMS, bs.conds.bOB, bs.conds.bFVG, bs.conds.bZone, bs.conds.bEntry];
-    const sGates = [ss.conds.sSweep, ss.conds.sBMS, ss.conds.sOB, ss.conds.sFVG, ss.conds.sZone, ss.conds.sEntry];
-    const bCount = bGates.filter(Boolean).length;
-    const sCount = sGates.filter(Boolean).length;
-
-    const gates  = bCount >= sCount ? bGates : sGates;
-    const isBuy  = bCount >= sCount;
-    const count  = Math.max(bCount, sCount);
-    if (count === 0) return;
-
-    const labels = ['G1\nTRIG','G2\nREG','G3\nNEWS','G4\nROOM','G5\nWICK','G6\nQUAL'];
+    const { labels, values: gates, isBuy, stratLabel } = lead;
+    const n = gates.length;
     const baseX = PAD.l + 8;
     const baseY = PAD.t + 10;
     const pillW = 28, pillH = 22, gap = 4;
     const activeCol = isBuy ? '#4ecdae' : '#f2606c';
-    const signalFiring = gates[5]; // G6 = signal
+    const signalFiring = gates[n - 1]; // last gate is always QUAL/signal
 
     ctx.save();
+    // Strategy header, above the pills, so it's always clear which of the
+    // three strategy systems this gate chain belongs to.
+    ctx.font = 'bold 7px "Space Mono"';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = signalFiring ? '#e3ad4c' : (activeCol + 'cc');
+    ctx.fillText(stratLabel, baseX, baseY - 3);
+
     gates.forEach((passed, i) => {
       const x = baseX + i * (pillW + gap);
       const y = baseY;
       // Background pill
       ctx.fillStyle = passed ? (activeCol + '22') : 'rgba(20,20,27,0.70)';
       ctx.strokeStyle = signalFiring ? '#e3ad4c' : (passed ? activeCol : '#2b2b38');
-      ctx.lineWidth = signalFiring && i === 5 ? 1.5 : 0.8;
+      ctx.lineWidth = signalFiring && i === n - 1 ? 1.5 : 0.8;
       ctx.beginPath();
       ctx.roundRect(x, y, pillW, pillH, 3);
       ctx.fill();
@@ -6419,11 +6535,19 @@ function drawChart(overridePositions = null, overrideMid = null) {
     });
 
     // Direction label after pills
-    const labelX = baseX + 6 * (pillW + gap) + 4;
+    const labelX = baseX + n * (pillW + gap) + 4;
     ctx.font = 'bold 8px "Space Mono"';
     ctx.textAlign = 'left';
-    ctx.fillStyle = signalFiring ? '#e3ad4c' : (count > 0 ? activeCol + 'aa' : '#8282af');
-    ctx.fillText(signalFiring ? (isBuy ? '▲ FIRE' : '▼ FIRE') : (isBuy ? `▲ ${count}/6` : `▼ ${count}/6`), labelX, baseY + 14);
+    ctx.fillStyle = signalFiring ? '#e3ad4c' : (activeCol + 'aa');
+    ctx.fillText(signalFiring ? (isBuy ? '▲ FIRE' : '▼ FIRE') : (isBuy ? `▲ ${lead.passed}/${n}` : `▼ ${lead.passed}/${n}`), labelX, baseY + 14);
+
+    // Legend row under the pills spells out what each gate number means for
+    // THIS strategy (they differ per strategy — see buildGateChain) so the
+    // numbers are never ambiguous.
+    ctx.font = '6px "Space Mono"';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#8282af';
+    ctx.fillText(labels.map((l, i) => `G${i+1}=${l}`).join('  '), baseX, baseY + pillH + 10);
     ctx.restore();
   })();
 
@@ -6894,8 +7018,11 @@ function drawChart(overridePositions = null, overrideMid = null) {
 // ── UI HELPERS ──
 function $(id){ return document.getElementById(id); }
 
-function updateConditionals(buyConds, sellConds) {
-  const all = {...buyConds,...sellConds};
+// Accepts any number of conds objects (one per strategy/direction) and
+// merges them — lets the Bot Setup drawer show live, per-gate indicator
+// dots for all three strategy systems (S1/S2/S3), not just Strategy 1.
+function updateConditionals(...condsObjs) {
+  const all = Object.assign({}, ...condsObjs);
   document.querySelectorAll('[data-k]').forEach(el => {
     const v=all[el.dataset.k], ci=el.querySelector('.ci');
     ci.textContent = v?'●':'○';
@@ -9116,23 +9243,36 @@ function runStrategy() {
   }
   const { bs, ss, ps, qs, rs, zs } = cands;
 
-  updateConditionals(bs.conds, ss.conds);
+  // Live gate dots for Strategy 2 (EMA Pullback) and Strategy 3 (Range-Edge
+  // Rejection) — built straight from the same raw.gates each strategy's own
+  // evaluate() already returns, so these can never disagree with the actual
+  // selection logic in selectStrongestStrategyCandidate() below.
+  const pg = (ps.raw && ps.raw.gates) || {}, qg = (qs.raw && qs.raw.gates) || {};
+  const rg = (rs.raw && rs.raw.gates) || {}, zg = (zs.raw && zs.raw.gates) || {};
+  const pConds = { pTrend:!!pg.trend, pTrigger:!!pg.trigger, pRegime:!!pg.regimeOk, pNews:!!pg.newsOk, pRoom:!!pg.roomOk, pEntry:!!ps.signal };
+  const qConds = { qTrend:!!qg.trend, qTrigger:!!qg.trigger, qRegime:!!qg.regimeOk, qNews:!!qg.newsOk, qRoom:!!qg.roomOk, qEntry:!!qs.signal };
+  const rConds = { rRange:!!rg.rangeShape, rTrigger:!!rg.trigger, rRegime:!!rg.regimeOk, rNews:!!rg.newsOk, rEntry:!!rs.signal };
+  const zConds = { zRange:!!zg.rangeShape, zTrigger:!!zg.trigger, zRegime:!!zg.regimeOk, zNews:!!zg.newsOk, zEntry:!!zs.signal };
+  updateConditionals(bs.conds, ss.conds, pConds, qConds, rConds, zConds);
   updateStrengthGauge(bs.strength, ss.strength);
 
-  // ── PROGRESS LOG (every 5 s when chain is partially forming) ──
+  // ── PROGRESS LOG (every 5 s when a chain is partially forming) ──
+  // Uses the same buildGateChain() the chart overlay reads from, so every
+  // one of the six candidates (S1/S2/S3 × BUY/SELL) gets reported here with
+  // the exact gate names/count that strategy actually has — not just
+  // Strategy 1's chain, and never a different gate list than what's drawn
+  // on the chart.
   if (now % 5000 < 1000) {
-    if (!bs.signal && bs.score > 0) {
-      const steps = ['TRIGGER','REGIME','NEWS','ROOM','WICK','QUALITY'];
-      const pending = steps.filter((_, i) => ![bs.conds.bSweep, bs.conds.bBMS,
-        bs.conds.bOB, bs.conds.bFVG, bs.conds.bZone, bs.conds.bEntry][i]);
-      addSignal('info', `BUY chain ${bs.score}/6 — waiting: ${pending.join('→')}`, mid);
-    }
-    if (!ss.signal && ss.score > 0) {
-      const steps = ['TRIGGER','REGIME','NEWS','ROOM','WICK','QUALITY'];
-      const pending = steps.filter((_, i) => ![ss.conds.sSweep, ss.conds.sBMS,
-        ss.conds.sOB, ss.conds.sFVG, ss.conds.sZone, ss.conds.sEntry][i]);
-      addSignal('info', `SELL chain ${ss.score}/6 — waiting: ${pending.join('→')}`, mid);
-    }
+    [
+      buildGateChain('S1_BUY', bs),  buildGateChain('S1_SELL', ss),
+      buildGateChain('S2_BUY', ps),  buildGateChain('S2_SELL', qs),
+      buildGateChain('S3_BUY', rs),  buildGateChain('S3_SELL', zs),
+    ].forEach(chain => {
+      if (chain.signal || chain.passed === 0) return; // fired already, or nothing forming yet
+      const pending = chain.labels.filter((_, i) => !chain.values[i]);
+      const dir = chain.isBuy ? 'BUY' : 'SELL';
+      addSignal('info', `${chain.stratLabel} ${dir} chain ${chain.passed}/${chain.total} — waiting: ${pending.join('→')}`, mid);
+    });
   }
 
   // ── DEDUPLICATION — computed for all six candidates up front so the
@@ -10886,19 +11026,52 @@ async function _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress
   return { candles: collected, oldestCovered: collected.length ? collected[0].epoch : endEpoch };
 }
 
+// Exness (MetaApi) history-read is safe to use for backtest data any time
+// the broker credentials are filled in — it's a plain GET of historical
+// candles, it never places an order, so it doesn't need the "Live Trading"
+// toggle (that toggle only gates real order placement + the live price
+// feed). This is what makes the two sources genuine fallbacks for each
+// other: whichever one is configured/reachable gets used, and if the
+// preferred source fails outright, the other one is tried for the full
+// range before giving up.
 async function _fetchBtRangeFromBroker(granularity, startEpoch, endEpoch, onProgress) {
-  if (LiveBroker.configured() && EXNESS_BT_TF_MAP[granularity]) {
-    addSignal('info', 'BT: fetching history from Exness (MetaApi) first...', null);
-    let exOut = null;
-    try {
-      exOut = await _fetchExnessBtRange(granularity, startEpoch, endEpoch, onProgress);
-    } catch (e) {
-      addSignal('warn', `Exness BT history failed: ${e.message} — using Coinbase for the full range`, null);
-    }
+  const exnessAvailable = LiveBroker.configured() && !!EXNESS_BT_TF_MAP[granularity];
+  // Prefer Exness first only when it's the actively-connected live feed
+  // (matches what live trading is actually seeing). Otherwise Coinbase goes
+  // first since it needs no credentials and has much deeper history —
+  // Exness is then the fallback if Coinbase comes back empty/short.
+  const preferExnessFirst = exnessAvailable && LiveBroker.enabled && LiveBroker.connectionStatus === 'CONNECTED';
 
+  async function tryExness(fromEpoch, toEpoch, onP) {
+    if (!exnessAvailable) return null;
+    addSignal('info', 'BT: fetching history from Exness (MetaApi)...', null);
+    try {
+      const out = await _fetchExnessBtRange(granularity, fromEpoch, toEpoch, onP);
+      if (out && out.candles.length) return out;
+      addSignal('warn', 'Exness returned no usable BT history for this range', null);
+      return null;
+    } catch (e) {
+      addSignal('warn', `Exness BT history failed: ${e.message}`, null);
+      return null;
+    }
+  }
+
+  async function tryCoinbase(fromEpoch, toEpoch, onP) {
+    addSignal('info', 'BT: fetching history from Coinbase...', null);
+    try {
+      const bars = await _fetchCoinbaseBtCandles(granularity, fromEpoch, toEpoch, onP);
+      return bars || [];
+    } catch (e) {
+      addSignal('warn', `Coinbase BT history failed: ${e.message}`, null);
+      return [];
+    }
+  }
+
+  if (preferExnessFirst) {
+    const exOut = await tryExness(startEpoch, endEpoch, onProgress);
     if (btCancelled) return exOut ? exOut.candles : [];
 
-    if (exOut && exOut.candles.length) {
+    if (exOut) {
       // Exness covered the whole requested range (its oldest bar reaches at
       // or before startEpoch) — no need to touch Coinbase at all.
       if (exOut.oldestCovered <= startEpoch + granularity) {
@@ -10910,16 +11083,43 @@ async function _fetchBtRangeFromBroker(granularity, startEpoch, endEpoch, onProg
       // Coinbase and merge the two.
       const gapEnd = exOut.oldestCovered - granularity;
       addSignal('info', `Exness history only reaches back to ${new Date(exOut.oldestCovered * 1000).toISOString().slice(0, 10)} — filling the rest from Coinbase`, null);
-      const cbFill = await _fetchCoinbaseBtCandles(granularity, startEpoch, gapEnd, onProgress);
+      const cbFill = await tryCoinbase(startEpoch, gapEnd, onProgress);
       const merged = cbFill.concat(exOut.candles);
       merged.sort((a, b) => a.epoch - b.epoch);
       const dedup = merged.filter((c, i, arr) => i === 0 || c.epoch !== arr[i - 1].epoch);
       addSignal('info', `${exOut.candles.length} bars from Exness + ${cbFill.length} bars from Coinbase = ${dedup.length} total M1 candles`, null);
       return dedup;
     }
-    addSignal('warn', 'Exness returned no usable BT history — using Coinbase for the full range', null);
+    // Exness failed completely — fall all the way back to Coinbase for the
+    // full range, same as the non-preferred path below.
+    addSignal('warn', 'Exness unavailable — falling back to Coinbase for the full range', null);
+    return tryCoinbase(startEpoch, endEpoch, onProgress);
   }
-  return _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProgress);
+
+  // Coinbase first.
+  const cbOut = await tryCoinbase(startEpoch, endEpoch, onProgress);
+  if (btCancelled) return cbOut;
+
+  const expectedBars = Math.max(1, Math.ceil((endEpoch - startEpoch) / granularity));
+  const coinbaseGotEnough = cbOut.length >= expectedBars * 0.5;
+  if (coinbaseGotEnough || !exnessAvailable) {
+    return cbOut;
+  }
+
+  // Coinbase came back short (rate-limited, blocked, or genuinely down) and
+  // Exness credentials exist — use Exness as the fallback source instead of
+  // just returning a partial/empty result.
+  addSignal('warn', `Coinbase only returned ${cbOut.length}/${expectedBars} bars — trying Exness (MetaApi) as fallback`, null);
+  const exOut = await tryExness(startEpoch, endEpoch, onProgress);
+  if (!exOut) return cbOut; // both failed — return whatever partial Coinbase data we have
+
+  // Merge whatever Coinbase did get with Exness's coverage, in case they
+  // cover slightly different parts of the range.
+  const merged = cbOut.concat(exOut.candles);
+  merged.sort((a, b) => a.epoch - b.epoch);
+  const dedup = merged.filter((c, i, arr) => i === 0 || c.epoch !== arr[i - 1].epoch);
+  addSignal('info', `${exOut.candles.length} bars from Exness + ${cbOut.length} bars from Coinbase = ${dedup.length} total M1 candles`, null);
+  return dedup;
 }
 
 // ── TOP-LEVEL BACKTEST FETCH — cache-first ──────────────────────────────────
@@ -10939,12 +11139,31 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
     const totalBars = Math.max(1, Math.ceil((endEpoch - startEpoch) / granularity) + 1);
     let covered = [];
     try { covered = await Storage.getCandleCoverage(granularity); } catch (e) {}
-    const gaps = _rangesSubtract(startEpoch, endEpoch, covered);
+    let gaps = _rangesSubtract(startEpoch, endEpoch, covered);
 
     if (!gaps.length) {
-      addSignal('info', 'BT data: entire range already cached locally — no network fetch needed', null);
-      if (onProgress) onProgress(1, 1);
-      return await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+      // Coverage claims the whole range is already cached — verify that
+      // before trusting it. A stale coverage record (see the completeness
+      // check below — this is the fix for it, but a bad record written
+      // before this fix may already be sitting in IndexedDB) would otherwise
+      // make every future backtest over this range silently pull back the
+      // same too-few candles from the cache and fail with "insufficient
+      // data" forever, with no way to recover short of manually clearing
+      // site data. Self-heal instead: if what's actually stored falls well
+      // short of what the range should hold, wipe the coverage record for
+      // it and fall through to a real re-fetch.
+      const cached = await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+      if (cached.length >= totalBars * 0.5) {
+        addSignal('info', 'BT data: entire range already cached locally — no network fetch needed', null);
+        if (onProgress) onProgress(1, 1);
+        return cached;
+      }
+      addSignal('warn', `BT cache looked complete but only had ${cached.length}/${totalBars} bars — clearing the stale cache record and re-fetching`, null);
+      try {
+        const purged = covered.filter(r => r.end < startEpoch || r.start > endEpoch);
+        await Storage.setCandleCoverage(granularity, purged);
+      } catch (e) {}
+      gaps = [{ start: startEpoch, end: endEpoch }];
     }
 
     const gapBars = gaps.reduce((s, g) => s + Math.max(1, Math.ceil((g.end - g.start) / granularity)), 0);
@@ -10954,6 +11173,7 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
     }
 
     let doneBarsBeforeCurrentGap = 0;
+    const freshlyFetched = []; // safety net — see the Storage.getCandlesInRange fallback below
     for (const gap of gaps) {
       if (btCancelled) break;
       const gapExpected = Math.max(1, Math.ceil((gap.end - gap.start) / granularity));
@@ -10962,11 +11182,24 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
         if (onProgress) onProgress(Math.min(totalBars, cachedBars + doneBarsBeforeCurrentGap + scaled), totalBars);
       });
       if (bars && bars.length) {
+        freshlyFetched.push(...bars);
         try {
           await Storage.putCandles(granularity, bars);
           if (!btCancelled) {
-            const newCoverage = _rangesMerge(await Storage.getCandleCoverage(granularity), { start: gap.start, end: gap.end });
-            await Storage.setCandleCoverage(granularity, newCoverage);
+            // Only record the FULL gap as covered once we actually got
+            // (essentially) every bar in it. Marking a partial/rate-limited
+            // fetch as fully covered is exactly what poisons the cache and
+            // causes "insufficient data" to keep failing forever, even after
+            // the underlying network/broker problem is gone — the app never
+            // tries fetching the missing part again because it believes it
+            // already has it.
+            const completeness = bars.length / gapExpected;
+            if (completeness >= 0.98) {
+              const newCoverage = _rangesMerge(await Storage.getCandleCoverage(granularity), { start: gap.start, end: gap.end });
+              await Storage.setCandleCoverage(granularity, newCoverage);
+            } else {
+              addSignal('warn', `BT data: only ${bars.length}/${gapExpected} bars fetched for part of the range — NOT marking it as fully cached, will retry the missing bars next run`, null);
+            }
           }
         } catch (e) {}
       }
@@ -10974,7 +11207,19 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
     }
 
     if (onProgress) onProgress(totalBars, totalBars);
-    return await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+    try {
+      return await Storage.getCandlesInRange(granularity, startEpoch, endEpoch);
+    } catch (e) {
+      // If the local cache read itself fails (IndexedDB hiccup) we'd
+      // otherwise lose every bar the network calls above just fetched.
+      // Fall back to whatever was collected this run instead of throwing
+      // the whole backtest into the generic top-level error.
+      addSignal('warn', `BT: local cache read failed (${e.message}) — using freshly-fetched bars only`, null);
+      const dedup = freshlyFetched
+        .sort((a, b) => a.epoch - b.epoch)
+        .filter((c, i, arr) => i === 0 || c.epoch !== arr[i - 1].epoch);
+      return dedup;
+    }
   } finally {
     btFetching = false;
   }
@@ -10999,7 +11244,13 @@ async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProg
   const MAX_PAGES = 6000; // ~6000 × 300 M1 bars ≈ 3.4yrs — plenty of headroom for a multi-year backtest
   if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
-  const CONCURRENCY = 8; // pushed up from 6 — still under Coinbase's public burst limit; higher just trades faster failures for more 429s
+  // Lowered from 8 → 4. Coinbase's public candles endpoint rate-limits hard
+  // (undocumented, but empirically well under 8 concurrent bursts from a
+  // single IP) — 8-wide bursts were tripping 429s on effectively every page
+  // at once, which is exactly the "all 39 pages fail together" pattern seen
+  // in the signal feed. 4 stays comfortably under that ceiling while still
+  // paging faster than a fully serial fetch.
+  const CONCURRENCY = 4;
   const results = new Array(pageStarts.length);
   let completedPages = 0;
   btFetching = true;
@@ -11022,11 +11273,24 @@ async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProg
         if (!res.ok) {
           // Surface Retry-After (present on a real 429) so the retry loop
           // can back off exactly as long as Coinbase actually asked for,
-          // instead of guessing with a fixed exponential delay.
+          // instead of guessing with a fixed exponential delay. Also read
+          // the response body so the signal feed shows *why* (e.g. Coinbase
+          // puts the real reason in a JSON {"message": "..."} body) instead
+          // of just a bare status code.
           const retryAfter = res.status === 429 ? parseFloat(res.headers.get('Retry-After')) : null;
-          const err = new Error(`HTTP ${res.status}`);
-          err.retryAfterMs = retryAfter && !isNaN(retryAfter) ? retryAfter * 1000 : null;
-          reject(err);
+          res.text().then(body => {
+            let detail = '';
+            try { const j = JSON.parse(body); detail = j.message || j.error || ''; } catch (_) { detail = (body || '').slice(0, 120); }
+            const err = new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
+            err.status = res.status;
+            err.retryAfterMs = retryAfter && !isNaN(retryAfter) ? retryAfter * 1000 : null;
+            reject(err);
+          }).catch(() => {
+            const err = new Error(`HTTP ${res.status}`);
+            err.status = res.status;
+            err.retryAfterMs = retryAfter && !isNaN(retryAfter) ? retryAfter * 1000 : null;
+            reject(err);
+          });
           return;
         }
         return res.json();
@@ -11041,21 +11305,28 @@ async function _fetchCoinbaseBtCandles(granularity, startEpoch, endEpoch, onProg
       .catch(e => { clearTimeout(timer); reject(e); });
   });
 
-  // Retry a single page up to 3 times so a transient connection drop or rate
+  // Retry a single page up to 4 times so a transient connection drop or rate
   // limit doesn't abort the whole fetch — but doesn't block any other
   // in-flight page while it retries. A 429 honors Coinbase's own
-  // Retry-After header; any other error falls back to a short back-off.
+  // Retry-After header; anything else backs off exponentially (with jitter)
+  // instead of the old fixed 500ms/attempt, which was too short to recover
+  // from a real rate-limit window. A non-retryable 400 (bad request — a
+  // params bug, not a transient failure) fails fast after one try instead of
+  // burning three more identical attempts.
   const fetchWithRetry = async (pageStartSec, pageIdx) => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    const MAX_ATTEMPTS = 4;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (btCancelled) return [];
       try {
         return await fetchPage(pageStartSec);
       } catch (e) {
-        if (attempt === 3) {
+        const nonRetryable = e.status === 400 || e.status === 401 || e.status === 404;
+        if (attempt === MAX_ATTEMPTS || nonRetryable) {
           addSignal('warn', `BT fetch error (page ${pageIdx + 1}/${pageStarts.length}): ${e.message}`, null);
           return [];
         }
-        await new Promise(r => setTimeout(r, e.retryAfterMs || 500 * attempt));
+        const backoff = e.retryAfterMs || (700 * Math.pow(2, attempt - 1)) + Math.random() * 300;
+        await new Promise(r => setTimeout(r, backoff));
       }
     }
     return [];
@@ -11152,13 +11423,31 @@ async function startBacktest() {
   $('btProgressWrap').style.display = 'block';
   $('btResults').style.display = 'none';
   setBtProgress(2, `Fetching ${btSelectedDays} day(s) of historical candles…`);
-  const m1All = await fetchBtCandles(60, startEpoch, endEpoch, (completed, total) => {
-    const pct = total > 0 ? completed / total : 0;
-    setBtProgress(Math.min(35, 2 + pct * 33), `Fetching candles… ${completed}/${total} pages`);
-  });
+  let m1All;
+  try {
+    m1All = await fetchBtCandles(60, startEpoch, endEpoch, (completed, total) => {
+      const pct = total > 0 ? completed / total : 0;
+      setBtProgress(Math.min(35, 2 + pct * 33), `Fetching candles… ${completed}/${total} pages`);
+    });
+  } catch (e) {
+    // Previously uncaught — any error thrown out of the fetch chain (a
+    // broker/exchange failure that slipped past its own try/catch, an
+    // IndexedDB error, etc.) left the Run button disabled and the progress
+    // bar frozen on "Fetching candles…" forever, with nothing telling the
+    // user it had actually died. Surface it and reset the UI instead.
+    // Also log the full error (with stack) to the console — the on-screen
+    // signal only shows e.message, which is often too short to diagnose.
+    console.error('Backtest data fetch failed:', e);
+    addSignal('warn', `Backtest data fetch failed: ${e.message}`, null);
+    setBtProgress(100, `Error: ${e.message}`);
+    return finishBt(false);
+  }
 
-  if (btCancelled || !m1All || m1All.length < 120) {
-    setBtProgress(100, 'Error: insufficient data');
+  if (btCancelled) return finishBt(false);
+  if (!m1All || m1All.length < 120) {
+    const got = m1All ? m1All.length : 0;
+    addSignal('warn', `Backtest: only ${got} M1 candles available for this range (need at least 120) — tried Coinbase${LiveBroker.configured() ? ' and Exness (MetaApi)' : ''}, both came back short. Check your network connection${LiveBroker.configured() ? ' and the broker credentials in Settings' : ''}`, null);
+    setBtProgress(100, `Error: insufficient data (${got} candles)`);
     return finishBt(false);
   }
 
