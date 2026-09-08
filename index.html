@@ -872,14 +872,11 @@ input[type=range]::-webkit-slider-thumb{
   <span class="sb-sep">·</span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(78,205,174,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1+OB</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(242,96,108,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1−OB</span></span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(34,187,255,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M5+FVG</span></span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,136,51,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M5−FVG</span></span>
+  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(34,187,255,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1+FVG</span></span>
+  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,136,51,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1−FVG</span></span>
   <span class="sb-sep">·</span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(78,205,174,0.2);border:1px dashed rgba(78,205,174,0.7);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">Entry 20–50%</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="font-size:8px;color:var(--text3)">G1–G6</span><span style="color:var(--text3)">Gates</span></span>
-  <span class="sb-sep">·</span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(68,255,136,0.3);display:inline-block;border-radius:1px;border:1px dashed rgba(68,255,136,0.5)"></span><span style="color:var(--text3)">M15+OB</span></span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,102,119,0.3);display:inline-block;border-radius:1px;border:1px dashed rgba(255,102,119,0.5)"></span><span style="color:var(--text3)">M15−OB</span></span>
 </div>
 
 <main class="chart-area">
@@ -950,7 +947,7 @@ input[type=range]::-webkit-slider-thumb{
     <div class="settings-section">
       <div class="settings-section-title">BUY Setup — Momentum Breakout + Quality Score Engine</div>
       <div class="conds" id="buyConds">
-        <div class="cond" data-k="bSess"><span class="ci no">○</span>Context: M5 Trend Bias = BULL (soft filter, not mandatory)</div>
+        <div class="cond" data-k="bSess"><span class="ci no">○</span>Context: M1 Trend Bias = BULL (soft filter, not mandatory)</div>
         <div class="cond" data-k="bKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
         <div class="cond" data-k="bSweep"><span class="ci no">○</span>G1: M1 Momentum Breakout — candle closes above N-bar range with strong body</div>
         <div class="cond" data-k="bBMS"><span class="ci no">○</span>G2: Market Regime OK (not DEAD / no-volatility)</div>
@@ -959,12 +956,12 @@ input[type=range]::-webkit-slider-thumb{
         <div class="cond" data-k="bZone"><span class="ci no">○</span>G5: No Rejection Wick (opposing wick under 35% of candle range)</div>
         <div class="cond" data-k="bEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor (B+/A/A+) → SIGNAL</div>
       </div>
-      <div class="gate-note">Counter-trend setups (against the M5 trend bias above) must clear the higher A-grade floor instead of B+.</div>
+      <div class="gate-note">Counter-trend setups (against the M1 trend bias above) must clear the higher A-grade floor instead of B+.</div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">SELL Setup — Momentum Breakout + Quality Score Engine</div>
       <div class="conds" id="sellConds">
-        <div class="cond" data-k="sSess"><span class="ci no">○</span>Context: M5 Trend Bias = BEAR (soft filter, not mandatory)</div>
+        <div class="cond" data-k="sSess"><span class="ci no">○</span>Context: M1 Trend Bias = BEAR (soft filter, not mandatory)</div>
         <div class="cond" data-k="sKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
         <div class="cond" data-k="sSweep"><span class="ci no">○</span>G1: M1 Momentum Breakout — candle closes below N-bar range with strong body</div>
         <div class="cond" data-k="sBMS"><span class="ci no">○</span>G2: Market Regime OK (not DEAD / no-volatility)</div>
@@ -973,7 +970,7 @@ input[type=range]::-webkit-slider-thumb{
         <div class="cond" data-k="sZone"><span class="ci no">○</span>G5: No Rejection Wick (opposing wick under 35% of candle range)</div>
         <div class="cond" data-k="sEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor (B+/A/A+) → SIGNAL</div>
       </div>
-      <div class="gate-note">Counter-trend setups (against the M5 trend bias above) must clear the higher A-grade floor instead of B+.</div>
+      <div class="gate-note">Counter-trend setups (against the M1 trend bias above) must clear the higher A-grade floor instead of B+.</div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">BUY Setup — Strategy 2: EMA Pullback Continuation</div>
@@ -1392,7 +1389,7 @@ input[type=range]::-webkit-slider-thumb{
   </div>
   <div class="drawer-body">
     <div class="bt-summary-note">
-      Replays your strategy on real historical BTCUSD data from Coinbase. Uses the identical momentum-breakout + quality-score engine and risk management as live mode — no data advantage, no repainting. M5 trend bias + M1 execution. Trades appear on chart during replay.<br><br>
+      Replays your strategy on real historical BTCUSD data from Coinbase. Uses the identical momentum-breakout + quality-score engine and risk management as live mode — no data advantage, no repainting. Trend bias and execution both run on the M1. Trades appear on chart during replay.<br><br>
       <span style="color:var(--gold);font-family:var(--sans);font-size:8px;font-weight:700;letter-spacing:.08em">MARKET SIMULATION ACTIVE:</span><br>
       News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $2.5–$8 typical, up to $18+ on news spikes (Exness Raw Spread BTCUSD) | Slippage: $0–$3 base, scaled up by order size and volatility | Execution delay: 20–120 ms, simulated on every fill | Commission: $4/lot round turn | Swap: -$16.39/lot/day long, tripled Friday (live Exness spec, only on trades held across rollover)
     </div>
@@ -1523,8 +1520,8 @@ input[type=range]::-webkit-slider-thumb{
 //                         reached so far in the price path, not final OHLC.
 //  ⑥ M5 / M15 forming — built on-the-fly from completed M1s + forming M1,
 //                         matching what a live OHLC subscription would show.
-//                         M5 = primary HTF (was M15). M1 = execution + confirmation.
-//                         M15 = EQ reference only (no signals, no zones, no execution).
+//                         Chart/display only — the strategy trades a single
+//                         timeframe: bias, direction, and execution are all M1.
 //  ⑦ SL before TP     — same-bar ambiguity resolved pessimistically (worst-
 //                         case fill), matching realistic broker behavior.
 //  ⑧ Position sizing  — identical formula in both modes; no hidden sizing.
@@ -2376,9 +2373,11 @@ function tpAlreadyGuaranteed(pos) {
 }
 
 // ── VOLATILITY ENGINE (ported from Python calculate_volatility) ──
-// Returns mean bar range over the last 20 completed M5 candles.
+// Returns mean bar range over the last 20 completed M1 candles.
 // Used by detectMarketRegime() and as a reference for regime classification.
-function calculateVolatility(tf = 300) {
+// The bot trades a single timeframe (M1), so every caller now reads M1 —
+// tf is kept as a parameter only so callers can be explicit about it.
+function calculateVolatility(tf = 60) {
   const arr = candles[tf];
   if (!arr || arr.length < 20) return 0;
   const last20 = arr.slice(-21, -1); // exclude forming candle
@@ -2394,21 +2393,22 @@ function calculateVolatility(tf = 300) {
 let _regimeCache = { arrRef: null, len: -1, lastClose: null, result: 'UNKNOWN' };
 
 // ── MARKET REGIME DETECTION (ported from Python detect_market_regime) ──
-// Classifies the current M5 market into one of four regimes:
+// Classifies the current M1 market into one of four regimes:
 //   DEAD      — volatility < 1.0 pts (no meaningful movement)
-//   EXPANSION — last M5 bar body > 1.5× mean volatility (strong momentum)
+//   EXPANSION — last M1 bar body > 1.5× mean volatility (strong momentum)
 //   TREND     — swing range over last 10 bars > 2× mean volatility
 //   RANGE     — default when none of the above apply
-// Used by runStrategy() to gate or adjust trade entries.
+// Used by runStrategy() to gate or adjust trade entries. The bot trades a
+// single timeframe (M1), so regime detection reads M1 candles exclusively.
 function detectMarketRegime() {
-  const arr = candles[300];
+  const arr = candles[60];
   if (!arr || arr.length < 20) return 'UNKNOWN';
 
-  // PERF: this function's result depends only on candles[300], never on
+  // PERF: this function's result depends only on candles[60], never on
   // trade direction — cache it and skip recomputing (including the
   // calculateVolatility() call inside) when nothing about that data has
   // actually changed since the last call. Cache key: same array reference,
-  // same length, same forming-bar close — if all three match, the M5 state
+  // same length, same forming-bar close — if all three match, the M1 state
   // is identical to last time, so the answer must be too.
   const lastC = arr.length ? arr[arr.length - 1].close : null;
   if (_regimeCache.arrRef === arr && _regimeCache.len === arr.length && _regimeCache.lastClose === lastC) {
@@ -2416,8 +2416,8 @@ function detectMarketRegime() {
   }
 
   let result;
-  const volatility = calculateVolatility(300);
-  const last = arr[arr.length - 2]; // last completed M5 bar (exclude forming)
+  const volatility = calculateVolatility(60);
+  const last = arr[arr.length - 2]; // last completed M1 bar (exclude forming)
   if (!last) {
     result = 'UNKNOWN';
   } else {
@@ -2446,29 +2446,33 @@ function detectMarketRegime() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  15M MACRO REGIME — top of the 15M → 5M → 1M hierarchy.
-//  Provides directional BIAS (BULL/BEAR/NEUTRAL) plus a regime label reusing
-//  the same DEAD/EXPANSION/TREND/RANGE taxonomy as detectMarketRegime(),
-//  computed off candles[900] instead of candles[300].
+//  MACRO CONTEXT — a longer-window read of the same M1 data everything else
+//  in the strategy uses. Provides directional BIAS (BULL/BEAR/NEUTRAL) plus
+//  a regime label reusing the same DEAD/EXPANSION/TREND/RANGE taxonomy as
+//  detectMarketRegime(), computed off a wider M1 lookback window so it moves
+//  more slowly than the bar-to-bar regime read.
 //
-//  This is CONTEXT ONLY. Nothing here hard-blocks a trade by default —
-//  evaluate() turns it into a soft score adjustment, the same way the
-//  existing M5 trend filter softly steers (rather than always blocking) M1
-//  entries today. 15M sets the preferred direction; it does not prevent a
-//  well-formed 5M/1M setup from firing against it.
+//  The bot trades a single timeframe — M1 — for everything: bias, direction
+//  and execution. This is no longer a separate higher timeframe, just a
+//  longer lens on the same M1 candles. It is CONTEXT ONLY: nothing here
+//  hard-blocks a trade by default — evaluate() turns it into a soft score
+//  adjustment, the same way the M1 trend filter softly steers (rather than
+//  always blocking) M1 entries today. Macro context sets the preferred
+//  direction; it does not prevent a well-formed M1 setup from firing
+//  against it.
 // ══════════════════════════════════════════════════════════════════════════
-let _macro15Cache = { arrRef: null, len: 0, lastClose: null, result: null };
-function detectMacroRegime15() {
-  const arr = (typeof candles !== "undefined") ? candles[900] : null;
+let _macroContextCache = { arrRef: null, len: 0, lastClose: null, result: null };
+function detectMacroRegimeM1() {
+  const arr = (typeof candles !== "undefined") ? candles[60] : null;
   if (!arr || arr.length < 15) return { bias: "NEUTRAL", regime: "UNKNOWN" };
 
   const lastC = arr.length ? arr[arr.length - 1].close : null;
-  if (_macro15Cache.arrRef === arr && _macro15Cache.len === arr.length && _macro15Cache.lastClose === lastC) {
-    return _macro15Cache.result;
+  if (_macroContextCache.arrRef === arr && _macroContextCache.len === arr.length && _macroContextCache.lastClose === lastC) {
+    return _macroContextCache.result;
   }
 
-  const completed = arr.slice(0, -1); // exclude forming 15M bar
-  const volatility = (typeof calculateVolatility === "function") ? calculateVolatility(900) : 0;
+  const completed = arr.slice(0, -1); // exclude forming M1 bar
+  const volatility = (typeof calculateVolatility === "function") ? calculateVolatility(60) : 0;
   const last = completed[completed.length - 1];
 
   let regime = "UNKNOWN", bias = "NEUTRAL";
@@ -2479,7 +2483,7 @@ function detectMacroRegime15() {
            : body > volatility * 1.5 ? "EXPANSION"
            : "RANGE"; // may be refined to TREND below once slope is known
 
-    const lookback = Math.min(12, completed.length); // ~3h of 15M bars
+    const lookback = Math.min(12, completed.length); // wider M1 window than the bar-to-bar regime read
     const window = completed.slice(-lookback);
     if (window.length >= 6) {
       const closes = window.map(c => c.close);
@@ -2495,7 +2499,7 @@ function detectMacroRegime15() {
   }
 
   const result = { bias, regime };
-  _macro15Cache = { arrRef: arr, len: arr.length, lastClose: lastC, result };
+  _macroContextCache = { arrRef: arr, len: arr.length, lastClose: lastC, result };
   return result;
 }
 
@@ -2512,8 +2516,10 @@ REFINED BTCUSD LIQUIDITY / STRUCTURE STRATEGY ENGINE
 =====================================================
 
 Purpose:
-- Rebuilds the strategy around the original bot's M5 liquidity -> M1 structure ->
-  OB/FVG -> retracement concept.
+- Rebuilds the strategy around a single-timeframe liquidity -> structure ->
+  OB/FVG -> retracement concept, with every stage of that chain — bias,
+  direction, and execution — running on the M1 candle. The bot trades one
+  timeframe only.
 - Intentionally does NOT add:
     * a separate market-environment gate
     * a separate displacement layer
@@ -2534,8 +2540,9 @@ Expected candle shape:
 }
 
 Expected candles object:
-candles[60] = M1 candle array
-candles[300] = M5 candle array
+candles[60] = M1 candle array — the only timeframe this engine reads for
+              trading decisions (bias, setup detection, quality score, gates,
+              and execution all read this array).
 
 Important:
 This is strategy/execution logic, not a promise of profitability. Backtest it with
@@ -2567,7 +2574,7 @@ const REFINED_STRATEGY_CFG = {
     // requires a genuinely convicted breakout candle rather than one that
     // barely clears the doji/indecision floor.
     minBodyRatio: 0.32,
-    useTrendFilter: true,   // re-enabled: trading with the M5 trend is the single biggest lever
+    useTrendFilter: true,   // re-enabled: trading with the M1 trend is the single biggest lever
                              // for setups that "almost win" rather than firing into a countertrend fade.
                              // HARD FILTER: when allowCounterTrend is false (default), counter-trend
                              // setups are rejected outright below — they are never merely scored down.
@@ -2599,40 +2606,43 @@ const REFINED_STRATEGY_CFG = {
     minRoomATR: 0.30
   },
 
-  // ---------- 15M macro context (top of the 15M→5M→1M hierarchy) ----------
+  // ---------- macro context (a longer-window read of the same M1 data) ----------
   // Context only, per design: sets the preferred direction and adds/removes
   // score points below (see macroScore in evaluate()). Never a hard block —
-  // a strong 5M/1M setup against the 15M bias can still fire, it just has
-  // to earn its way to threshold without the alignment bonus.
-  macro15: {
+  // a strong M1 setup against the macro bias can still fire, it just has
+  // to earn its way to threshold without the alignment bonus. This used to
+  // be a separate 15M timeframe; it is now just a wider lookback window over
+  // the same M1 candles everything else in the strategy reads.
+  macroContext: {
     enabled: true,
     biasScoreWeight: 15   // max points contributed to scoreTotal when aligned
   },
 
-  // ---------- 5M setup engine ----------
-  // Promotes 5M from "context only" to an actual tradable timeframe. Scans
-  // the last few COMPLETED 5M bars (not just the newest) for a
-  // breakout-of-range trigger, mirroring the M1 trigger one level up.
-  // A fresh, aligned 5M setup (a) boosts a matching M1 execution's score
-  // via m5Bonus below, and (b) — if strong and fresh enough — can fire on
-  // its own through the fast lane in evaluate(), without waiting on a
-  // separate M1 pattern. This is what lets the bot actively trade BOTH 5M
-  // and 1M instead of 5M being pure context.
-  m5Setup: {
+  // ---------- M1 fast-lane setup engine ----------
+  // A second, independent M1 breakout scan (different lookback/body-ratio
+  // than the primary trigger below) over the last few COMPLETED M1 bars —
+  // not just the newest — for a breakout-of-range trigger. A fresh, aligned
+  // fast-lane setup (a) boosts a matching primary M1 trigger's score via
+  // flBonus below, and (b) — if strong and fresh enough — can fire on its
+  // own through the fast lane in evaluate(), without waiting on the primary
+  // M1 pattern. This used to run on M5 bars as a separate higher timeframe;
+  // it now runs on M1 bars like everything else — the whole strategy trades
+  // one timeframe only.
+  fastLaneSetup: {
     enabled: true,
-    lookbackBars: 8,       // M5 range lookback for the breakout trigger
+    lookbackBars: 8,       // M1 range lookback for the breakout trigger
     minBodyRatio: 0.30,
-    windowBars: 4,          // how many completed M5 bars back a setup still
-                             // counts as "fresh" for the M1 confirmation bonus
-    minScoreForWindow: 55,  // min 5M setup score to grant the M1 bonus at all
+    windowBars: 4,          // how many completed M1 bars back a setup still
+                             // counts as "fresh" for the primary-trigger confirmation bonus
+    minScoreForWindow: 55,  // min fast-lane setup score to grant the bonus at all
     bonusPoints: 12,        // score bonus applied to a matching, fresh M1 trigger
-    fastLaneScore: 82,      // min 5M setup score to qualify for fast-lane entry
-    fastLaneMaxBarsAgo: 1   // fast lane only while the setup is this fresh (M5 bars)
+    fastLaneScore: 82,      // min fast-lane setup score to qualify for fast-lane entry
+    fastLaneMaxBarsAgo: 1   // fast lane only while the setup is this fresh (M1 bars)
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
   liquidity: {
-    m5Lookback: 40,
+    sweepLookbackBars: 40, // was m5Lookback — scans M1 bars now, same as everything else
     swingStrength: 1,
     minSweepDepthATR: 0.003,      // was 0.008 — accepts even more trivial sweeps
     maxSweepDepthATR: 3.00,       // was 2.50
@@ -2642,7 +2652,7 @@ const REFINED_STRATEGY_CFG = {
     minPreviousTouches: 1,
     maxPreviousTouches: 20,       // was 16
     preferFreshLiquidity: true,
-    // NEW — scans the last N completed M5 bars for a sweep, not just the
+    // Scans the last N completed M1 bars for a sweep, not just the
     // single most-recent bar. This was the main reason 0 trades ever fired:
     // a valid sweep 2-3 bars back was being silently discarded.
     sweepRecencyBars: 6
@@ -2894,10 +2904,11 @@ const RefinedStrategy = (() => {
     return n ? sum / n : 0;
   }
 
-  // ── SIMPLE TREND FILTER (EMA21 vs EMA50 on M5 closes) ──
+  // ── SIMPLE TREND FILTER (EMA21 vs EMA50 on M1 closes) ──
   // This is the one rule that gives the strategy an actual directional edge:
-  // only take BUY setups while the higher-timeframe trend is up, only take
-  // SELL setups while it's down. Easy to reason about, cheap to compute.
+  // only take BUY setups while the trend is up, only take SELL setups while
+  // it's down. Easy to reason about, cheap to compute. Bias, direction, and
+  // execution are all read off the same M1 candle series.
   function emaSeries(values, period) {
     if (!values.length) return [];
     const k = 2 / (period + 1);
@@ -2908,9 +2919,9 @@ const RefinedStrategy = (() => {
     return out;
   }
 
-  function getTrendBias(m5) {
-    if (!m5 || m5.length < 55) return "NONE"; // not enough M5 history — stay neutral
-    const closes = m5.slice(0, -1).map(c => c.close); // exclude forming bar
+  function getTrendBias(m1) {
+    if (!m1 || m1.length < 55) return "NONE"; // not enough M1 history — stay neutral
+    const closes = m1.slice(0, -1).map(c => c.close); // exclude forming bar
     if (closes.length < 55) return "NONE";
     const ema21 = emaSeries(closes, 21);
     const ema50 = emaSeries(closes, 50);
@@ -2963,7 +2974,7 @@ const RefinedStrategy = (() => {
     if (!Array.isArray(arr)) return [];
     // PERF: this is called ~10-20× per candle across evaluate()'s call
     // graph (every evalBuy/evalSell tick, plus again inside sub-checks
-    // like findM5LiquiditySweep), each time copying up to a 500-element
+    // like findLiquiditySweep), each time copying up to a 500-element
     // array via .filter() — even though every candle here is either real
     // fetched history or one we built ourselves, so it's already valid
     // essentially 100% of the time. Scan first and only allocate a new
@@ -2992,19 +3003,19 @@ const RefinedStrategy = (() => {
      3. LIQUIDITY ENGINE
      ========================================================= */
 
-  function findM5LiquiditySweep(m5, direction) {
-    const bars = normalizeCandles(m5);
+  function findLiquiditySweep(m1, direction) {
+    const bars = normalizeCandles(m1);
     if (bars.length < 8) return null;
 
-    // Use completed M5 candles only.
+    // Use completed M1 candles only.
     const completed = bars.length > 1 ? bars.slice(0, -1) : bars;
     if (!completed.length) return null;
 
     const currentATR = atr(completed, 14);
-    const lookback = Math.min(C.liquidity.m5Lookback, completed.length - 1);
+    const lookback = Math.min(C.liquidity.sweepLookbackBars, completed.length - 1);
 
     // FIX: previously this only ever checked the single most-recent completed
-    // M5 bar as the "sweep candle" — a sweep that happened 2-3 bars ago is
+    // M1 bar as the "sweep candle" — a sweep that happened 2-3 bars ago is
     // just as tradeable, but was being silently missed entirely. Scan a
     // small recency window of recent completed bars instead of just the last one.
     const recencyWindow = Math.max(1, C.liquidity.sweepRecencyBars || 1);
@@ -3780,15 +3791,17 @@ const RefinedStrategy = (() => {
 
   // ─────────────────────────────────────────────────────────────────────
   // SIMPLE MODE evaluate()
-  // Old pipeline required ALL of: M5 liquidity sweep AND M1 structure
-  // shift AND valid order block AND price inside a computed retracement
-  // zone AND a 0-100 quality score above threshold — five ANDed gates,
-  // which is why trades were rare.
+  // Old pipeline required ALL of: liquidity sweep AND structure shift AND
+  // valid order block AND price inside a computed retracement zone AND a
+  // 0-100 quality score above threshold — five ANDed gates, which is why
+  // trades were rare.
   //
   // New pipeline: ONE trigger — the latest completed M1 candle closes
   // beyond the recent N-bar range with a real body (not a doji), in the
-  // trade's direction. An optional soft HTF trend filter (on by default)
-  // just skips clearly counter-trend trades; it doesn't add extra gates.
+  // trade's direction. An optional soft trend filter (on by default) just
+  // skips clearly counter-trend trades; it doesn't add extra gates. Bias,
+  // direction, and execution all read the same M1 candle array — the bot
+  // trades one timeframe only.
   //
   // calculateTradeGeometry() (SL/TP math) and calculatePositionSize()
   // below are UNCHANGED — this only touches signal detection, so the
@@ -3796,25 +3809,26 @@ const RefinedStrategy = (() => {
   // ─────────────────────────────────────────────────────────────────────
 
   // ─────────────────────────────────────────────────────────────────────
-  // 5M SETUP ENGINE — scans the last few completed M5 bars for a
-  // breakout-of-range trigger on the 5M timeframe itself. Purely a scan
-  // over history already available on every tick, so it needs no
+  // M1 FAST-LANE SETUP ENGINE — a second, independent scan over the last
+  // few completed M1 bars for a breakout-of-range trigger, run alongside
+  // the primary M1 trigger below with its own lookback/body-ratio. Purely
+  // a scan over history already available on every tick, so it needs no
   // persistent state and stays fully backtestable bar-by-bar (walk-forward
   // / mini-backtest replay works unchanged).
   //
   // Returns { found:false } when nothing qualifies, or
   // { found:true, barsAgo, score, bar, priorHigh, priorLow } for the
   // strongest qualifying bar within the scan window. barsAgo = 0 means the
-  // most recently completed M5 bar.
+  // most recently completed M1 bar.
   // ─────────────────────────────────────────────────────────────────────
-  function detect5MSetup(direction, m5, macro) {
+  function detectFastLaneSetup(direction, m1, macro) {
     const isBuy = direction === "BUY";
-    const cfg = C.m5Setup || {};
+    const cfg = C.fastLaneSetup || {};
     const lookback = cfg.lookbackBars || 8;
     const minBody  = cfg.minBodyRatio != null ? cfg.minBodyRatio : 0.30;
     const scanBars = Math.max(1, cfg.windowBars || 4);
 
-    const completed = normalizeCandles(m5).slice(0, -1); // drop forming M5 bar
+    const completed = normalizeCandles(m1).slice(0, -1); // drop forming M1 bar
     if (completed.length < lookback + scanBars + 2) return { found: false };
 
     let best = null;
@@ -3863,11 +3877,6 @@ const RefinedStrategy = (() => {
         ? candleSets[60]
         : []
     );
-    const m5 = normalizeCandles(
-      candleSets && candleSets[300]
-        ? candleSets[300]
-        : []
-    );
 
     const need = C.simple.lookbackBars + 2;
     if (m1.length < need) {
@@ -3885,38 +3894,40 @@ const RefinedStrategy = (() => {
     // a setup AGAINST it is only allowed through if it scores B+ or better
     // (see the approval check further down, near scoreTotal). This trades
     // more setups than a hard block (good counter-trend reversals get taken)
-    // while still keeping the bot's core edge, which is trend alignment. ──
-    const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
+    // while still keeping the bot's core edge, which is trend alignment.
+    // Bias is read off the same M1 candles as everything else — single
+    // timeframe, no separate higher-timeframe series involved. ──
+    const trend = (C.simple.useTrendFilter && m1.length >= 55) ? getTrendBias(m1) : "NONE";
     const counterTrend = trend !== "NONE" && ((isBuy && trend === "BEAR") || (!isBuy && trend === "BULL"));
 
-    // ── 15M MACRO CONTEXT — top of the 15M→5M→1M hierarchy. Context only:
-    // contributes score points below, never a hard block (see macro15.
-    // config comment). ──
-    const macro = (C.macro15 && C.macro15.enabled && typeof detectMacroRegime15 === "function")
-      ? detectMacroRegime15()
+    // ── MACRO CONTEXT — a longer-window read of the same M1 candles.
+    // Context only: contributes score points below, never a hard block
+    // (see macroContext config comment). ──
+    const macro = (C.macroContext && C.macroContext.enabled && typeof detectMacroRegimeM1 === "function")
+      ? detectMacroRegimeM1()
       : { bias: "NONE", regime: "UNKNOWN" };
     const macroAligned = (isBuy && macro.bias === "BULL") || (!isBuy && macro.bias === "BEAR");
     const macroOpposed = (isBuy && macro.bias === "BEAR") || (!isBuy && macro.bias === "BULL");
 
-    // ── 5M SETUP ENGINE — an independent 5M breakout scan. A fresh, aligned
-    // result boosts a matching M1 trigger's score (m5Bonus below) and, if
-    // strong/fresh enough, can fire on its own via the fast lane — this is
-    // what makes the 5M timeframe actually tradable, not just context. ──
-    const m5setup = (C.m5Setup && C.m5Setup.enabled)
-      ? detect5MSetup(direction, m5, macro)
+    // ── M1 FAST-LANE SETUP ENGINE — an independent M1 breakout scan. A
+    // fresh, aligned result boosts a matching M1 trigger's score (flBonus
+    // below) and, if strong/fresh enough, can fire on its own via the fast
+    // lane — a second M1-based path to entry, not a second timeframe. ──
+    const flSetup = (C.fastLaneSetup && C.fastLaneSetup.enabled)
+      ? detectFastLaneSetup(direction, m1, macro)
       : { found: false };
-    const m5Fresh = m5setup.found
-      && m5setup.barsAgo <= C.m5Setup.windowBars
-      && m5setup.score >= C.m5Setup.minScoreForWindow;
-    const fastLaneEligible = m5setup.found
-      && m5setup.score >= C.m5Setup.fastLaneScore
-      && m5setup.barsAgo <= C.m5Setup.fastLaneMaxBarsAgo
+    const flFresh = flSetup.found
+      && flSetup.barsAgo <= C.fastLaneSetup.windowBars
+      && flSetup.score >= C.fastLaneSetup.minScoreForWindow;
+    const fastLaneEligible = flSetup.found
+      && flSetup.score >= C.fastLaneSetup.fastLaneScore
+      && flSetup.barsAgo <= C.fastLaneSetup.fastLaneMaxBarsAgo
       && !macroOpposed;
 
-    // ── HARD TREND FILTER ── when the HTF trend filter is active and this
+    // ── HARD TREND FILTER ── when the trend filter is active and this
     // setup runs against it, reject it outright rather than merely scoring
     // it down. Counter-trend Strategy 1 trades are never allowed through,
-    // full stop — the bot only trades with the dominant trend.
+    // full stop — the bot only trades with the dominant M1 trend.
     if (C.simple.useTrendFilter && C.simple.allowCounterTrend === false && counterTrend) {
       return {
         signal: false,
@@ -4074,10 +4085,10 @@ const RefinedStrategy = (() => {
     const overshoot = isBuy ? (last.close - recentHigh) : (recentLow - last.close);
     const overshootATR = currentATR > 0 ? clamp(overshoot / currentATR, 0, 1) : 0;
     // Fast-lane entries didn't come from an M1 breakout candle, so score
-    // them off the 5M setup's own strength instead of a possibly-unremarkable
-    // M1 candle.
+    // them off the fast-lane setup's own strength instead of a possibly-
+    // unremarkable M1 trigger candle.
     const breakoutScore = fastLane
-      ? clamp((m5setup.score || 0) / 100, 0, 1) * 45                                // up to 45
+      ? clamp((flSetup.score || 0) / 100, 0, 1) * 45                                 // up to 45
       : clamp(bodyRatio, 0, 1) * 30 + overshootATR * 15;                            // up to 45
 
     const aligned = (isBuy && trend === "BULL") || (!isBuy && trend === "BEAR");
@@ -4090,21 +4101,22 @@ const RefinedStrategy = (() => {
       ? clamp(roomATR / 3, 0, 1) * 15
       : 15;                                                                         // up to 15
 
-    // ── 15M macro alignment — soft bonus only (see macro15 config). ──
-    const macroScore = !C.macro15 || !C.macro15.enabled ? 0
-      : macroAligned ? C.macro15.biasScoreWeight
+    // ── Macro alignment — soft bonus only (see macroContext config). ──
+    const macroScore = !C.macroContext || !C.macroContext.enabled ? 0
+      : macroAligned ? C.macroContext.biasScoreWeight
       : macroOpposed ? 0
-      : C.macro15.biasScoreWeight * 0.4;                                           // up to macro15.biasScoreWeight
+      : C.macroContext.biasScoreWeight * 0.4;                                       // up to macroContext.biasScoreWeight
 
-    // ── 5M confirmation bonus — rewards an M1 trigger that lines up with a
-    // fresh, independently-valid 5M setup, without loosening the M1 trigger
-    // itself. This is the "redesign the filters, don't just lower the bar"
-    // mechanism: healthy-confluence trades clear threshold more easily,
-    // isolated M1 noise still has to earn it on its own. Not applied in fast
-    // lane (breakoutScore already carries the 5M strength there). ──
-    const m5Bonus = (!fastLane && m5Fresh)
-      ? C.m5Setup.bonusPoints * clamp(1 - (m5setup.barsAgo / (C.m5Setup.windowBars + 1)), 0.3, 1)
-      : 0;                                                                          // up to m5Setup.bonusPoints
+    // ── Fast-lane confirmation bonus — rewards an M1 trigger that lines up
+    // with a fresh, independently-valid fast-lane setup, without loosening
+    // the M1 trigger itself. This is the "redesign the filters, don't just
+    // lower the bar" mechanism: healthy-confluence trades clear threshold
+    // more easily, isolated M1 noise still has to earn it on its own. Not
+    // applied in fast lane (breakoutScore already carries that strength
+    // there). ──
+    const flBonus = (!fastLane && flFresh)
+      ? C.fastLaneSetup.bonusPoints * clamp(1 - (flSetup.barsAgo / (C.fastLaneSetup.windowBars + 1)), 0.3, 1)
+      : 0;                                                                          // up to fastLaneSetup.bonusPoints
 
     // ── Wick-rejection penalty — a breakout candle that closes strongly but
     // leaves a large wick on the OPPOSITE side (e.g. a bull breakout with a
@@ -4138,7 +4150,7 @@ const RefinedStrategy = (() => {
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;                   // 0 to -11
 
     const scoreTotal = clamp(
-      breakoutScore + trendScore + regimeScore + roomScore + macroScore + m5Bonus - wickPenalty,
+      breakoutScore + trendScore + regimeScore + roomScore + macroScore + flBonus - wickPenalty,
       0, 100
     );
 
@@ -4171,19 +4183,19 @@ const RefinedStrategy = (() => {
                 : "B+";
 
     // Minimal stand-ins for the structure objects the (unchanged) trade
-    // geometry / UI code expects. Standalone/M5-confirmed M1 trades build
-    // these off the M1 breakout candle and the range it broke, same as
-    // before. Fast-lane (5M-sourced) trades build them off the 5M setup bar
-    // and its prior range instead — a fast-lane entry didn't come from an
-    // M1 structural break, so its stop should reflect 5M structure, not an
-    // arbitrary M1 candle.
+    // geometry / UI code expects. Standalone/fast-lane-confirmed M1 trades
+    // build these off the M1 breakout candle and the range it broke, same
+    // as before. Fast-lane trades build them off the fast-lane setup bar
+    // and its prior range instead — a fast-lane entry didn't come from the
+    // primary M1 trigger, so its stop should reflect that setup's own
+    // structure, not an arbitrary M1 candle. Both are M1 candles either way.
     const sweep = fastLane
       ? {
-          type: isBuy ? "M5_RANGE_LOW" : "M5_RANGE_HIGH",
-          level: isBuy ? m5setup.priorLow : m5setup.priorHigh,
-          candle: { low: m5setup.priorLow, high: m5setup.priorHigh },
-          epoch: m5setup.bar.epoch,
-          quality: m5setup.score
+          type: isBuy ? "M1_RANGE_LOW" : "M1_RANGE_HIGH",
+          level: isBuy ? flSetup.priorLow : flSetup.priorHigh,
+          candle: { low: flSetup.priorLow, high: flSetup.priorHigh },
+          epoch: flSetup.bar.epoch,
+          quality: flSetup.score
         }
       : {
           type: isBuy ? "SIMPLE_RANGE_LOW" : "SIMPLE_RANGE_HIGH",
@@ -4193,13 +4205,13 @@ const RefinedStrategy = (() => {
           quality: 50
         };
     const bms = fastLane
-      ? { level: isBuy ? m5setup.priorLow : m5setup.priorHigh, direction, candle: m5setup.bar }
+      ? { level: isBuy ? flSetup.priorLow : flSetup.priorHigh, direction, candle: flSetup.bar }
       : { level: isBuy ? recentLow : recentHigh, direction, candle: last };
     const ob = fastLane
       ? {
-          low:  Math.min(m5setup.bar.open, m5setup.bar.close),
-          high: Math.max(m5setup.bar.open, m5setup.bar.close),
-          epoch: m5setup.bar.epoch
+          low:  Math.min(flSetup.bar.open, flSetup.bar.close),
+          high: Math.max(flSetup.bar.open, flSetup.bar.close),
+          epoch: flSetup.bar.epoch
         }
       : {
           low:  Math.min(last.open, last.close),
@@ -4208,10 +4220,10 @@ const RefinedStrategy = (() => {
         };
     const zone = fastLane
       ? {
-          min: Math.min(m5setup.bar.open, m5setup.bar.close),
-          max: Math.max(m5setup.bar.open, m5setup.bar.close),
-          center: m5setup.bar.close,
-          source: "M5_FAST_LANE_BAR"
+          min: Math.min(flSetup.bar.open, flSetup.bar.close),
+          max: Math.max(flSetup.bar.open, flSetup.bar.close),
+          center: flSetup.bar.close,
+          source: "M1_FAST_LANE_BAR"
         }
       : {
           min: Math.min(last.open, last.close),
@@ -4219,14 +4231,14 @@ const RefinedStrategy = (() => {
           center: last.close,
           source: "SIMPLE_TRIGGER_CANDLE"
         };
-    const source = fastLane ? "M5_FAST_LANE" : (m5Fresh ? "M1_CONFIRMED_BY_M5" : "M1_STANDALONE");
+    const source = fastLane ? "M1_FAST_LANE" : (flFresh ? "M1_CONFIRMED_BY_FAST_LANE" : "M1_STANDALONE");
     const quality = {
       total: scoreTotal,
       grade,
       approved: true,
       components: {
         breakout: breakoutScore, trend: trendScore, regime: regimeScore, room: roomScore,
-        macro: macroScore, m5Bonus, wickPenalty
+        macro: macroScore, flBonus, wickPenalty
       }
     };
 
@@ -4234,16 +4246,16 @@ const RefinedStrategy = (() => {
       signal: true,
       direction,
       reason: fastLane
-        ? "M5_FAST_LANE_ENTRY"
+        ? "M1_FAST_LANE_ENTRY"
         : (counterTrend ? "SIMPLE_MOMENTUM_BREAKOUT_COUNTERTREND"
-                        : (m5Fresh ? "M1_BREAKOUT_M5_CONFIRMED" : "SIMPLE_MOMENTUM_BREAKOUT")),
-      trend, counterTrend, macro, source, fastLane, m5setup: m5setup.found ? m5setup : null,
+                        : (flFresh ? "M1_BREAKOUT_FAST_LANE_CONFIRMED" : "SIMPLE_MOMENTUM_BREAKOUT")),
+      trend, counterTrend, macro, source, fastLane, flSetup: flSetup.found ? flSetup : null,
       sweep, bms, ob, fvg: null, zone, quality,
       setupAgeMinutes: 0,
       expired: false,
       gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: true, quality: true },
       entryModel: {
-        type: fastLane ? "M5_FAST_LANE" : "SIMPLE_MOMENTUM_BREAKOUT",
+        type: fastLane ? "M1_FAST_LANE" : "SIMPLE_MOMENTUM_BREAKOUT",
         zoneMin: zone.min,
         zoneMax: zone.max,
         center: zone.center
@@ -4267,12 +4279,11 @@ const RefinedStrategy = (() => {
   function computeSetupStrength(direction, candleSets) {
     const isBuy = direction === "BUY";
     const m1 = normalizeCandles(candleSets && candleSets[60] ? candleSets[60] : []);
-    const m5 = normalizeCandles(candleSets && candleSets[300] ? candleSets[300] : []);
 
     const need = C.simple.lookbackBars + 2;
     if (m1.length < need) return { score: 0, trend: "NONE", counterTrend: false, ready: false };
 
-    const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
+    const trend = (C.simple.useTrendFilter && m1.length >= 55) ? getTrendBias(m1) : "NONE";
 
     const completed = m1.slice(0, -1);
     const last = completed[completed.length - 1];
@@ -4326,25 +4337,26 @@ const RefinedStrategy = (() => {
     const oppWickRatio = barRange > 0 ? clamp(oppWick / barRange, 0, 1) : 0;
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;
 
-    // Mirrors evaluate()'s macro/5M-bonus terms so the live gauge tracks the
-    // same number that actually gates entries, not a stale subset of it.
-    const macro = (C.macro15 && C.macro15.enabled && typeof detectMacroRegime15 === "function")
-      ? detectMacroRegime15() : { bias: "NONE", regime: "UNKNOWN" };
+    // Mirrors evaluate()'s macro/fast-lane-bonus terms so the live gauge
+    // tracks the same number that actually gates entries, not a stale
+    // subset of it.
+    const macro = (C.macroContext && C.macroContext.enabled && typeof detectMacroRegimeM1 === "function")
+      ? detectMacroRegimeM1() : { bias: "NONE", regime: "UNKNOWN" };
     const macroAligned = (isBuy && macro.bias === "BULL") || (!isBuy && macro.bias === "BEAR");
     const macroOpposed = (isBuy && macro.bias === "BEAR") || (!isBuy && macro.bias === "BULL");
-    const macroScore = !C.macro15 || !C.macro15.enabled ? 0
-      : macroAligned ? C.macro15.biasScoreWeight
+    const macroScore = !C.macroContext || !C.macroContext.enabled ? 0
+      : macroAligned ? C.macroContext.biasScoreWeight
       : macroOpposed ? 0
-      : C.macro15.biasScoreWeight * 0.4;
+      : C.macroContext.biasScoreWeight * 0.4;
 
-    const m5setup = (C.m5Setup && C.m5Setup.enabled) ? detect5MSetup(direction, m5, macro) : { found: false };
-    const m5Fresh = m5setup.found && m5setup.barsAgo <= C.m5Setup.windowBars && m5setup.score >= C.m5Setup.minScoreForWindow;
-    const m5Bonus = m5Fresh
-      ? C.m5Setup.bonusPoints * clamp(1 - (m5setup.barsAgo / (C.m5Setup.windowBars + 1)), 0.3, 1)
+    const flSetup = (C.fastLaneSetup && C.fastLaneSetup.enabled) ? detectFastLaneSetup(direction, m1, macro) : { found: false };
+    const flFresh = flSetup.found && flSetup.barsAgo <= C.fastLaneSetup.windowBars && flSetup.score >= C.fastLaneSetup.minScoreForWindow;
+    const flBonus = flFresh
+      ? C.fastLaneSetup.bonusPoints * clamp(1 - (flSetup.barsAgo / (C.fastLaneSetup.windowBars + 1)), 0.3, 1)
       : 0;
 
-    const score = clamp(breakoutScore + trendScore + regimeScore + roomScore + macroScore + m5Bonus - wickPenalty, 0, 100);
-    return { score, trend, counterTrend, regime, macro, m5setup: m5setup.found ? m5setup : null, ready: true };
+    const score = clamp(breakoutScore + trendScore + regimeScore + roomScore + macroScore + flBonus - wickPenalty, 0, 100);
+    return { score, trend, counterTrend, regime, macro, flSetup: flSetup.found ? flSetup : null, ready: true };
   }
 
 
@@ -4849,7 +4861,7 @@ const RefinedStrategy = (() => {
     },
 
     // Expose low-level components for backtesting/debugging.
-    liquidity: findM5LiquiditySweep,
+    liquidity: findLiquiditySweep,
     structure: detectStructureShift,
     orderBlock: detectOrderBlock,
     fvg: detectFVG,
@@ -5711,8 +5723,8 @@ function analyzeRefinedTrades(trades) {
    - Trade fingerprints are stored for empirical optimization.
    - Analytics measure expectancy and profit factor rather than win rate alone.
 
-   ORIGINAL STRATEGY IDENTITY PRESERVED:
-   M5 liquidity sweep
+   ORIGINAL STRATEGY IDENTITY PRESERVED (now single-timeframe — M1 throughout):
+   M1 liquidity sweep
        ->
    M1 structure shift / BMS
        ->
@@ -5815,7 +5827,7 @@ function analyzeRefinedTrades(trades) {
 
    A trade is approved only when:
 
-      M5 liquidity sweep exists
+      M1 liquidity sweep exists
               AND
       M1 structure shift follows the sweep
               AND
@@ -6110,9 +6122,11 @@ const strategy = {
   // Mirrors the original bullishBMS()/bearishBMS() "full chain result for
   // chart rendering" helpers, rebuilt on the new engine's exposed
   // low-level detectors (liquidity -> structure -> orderBlock -> fvg).
+  // Every stage reads the same M1 candle array — single timeframe, same as
+  // the live evaluate()/computeSetupStrength() decision path.
   _chain(direction) {
-    const m5 = candles[300], m1 = candles[60];
-    const sweep = RefinedStrategy.liquidity(m5, direction);
+    const m1 = candles[60];
+    const sweep = RefinedStrategy.liquidity(m1, direction);
     if (!sweep) return { valid: false };
     const bms = RefinedStrategy.structure(m1, sweep, direction);
     if (!bms) return { valid: false };
@@ -6148,7 +6162,7 @@ const strategy = {
   // .conds{}, .ob, .fvg, .zone, .slRef, .sweepEpoch/.sweepLow/.sweepHigh.
   _eval(direction, price) {
     const r = RefinedStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60], 300: candles[300] }
+      price, { 60: candles[60] }
     );
     const gDefault = { trigger:false, regimeOk:false, newsOk:false, roomOk:false, wickOk:false, quality:false };
     const g = Object.assign({}, gDefault, r.gates || {});
@@ -6159,7 +6173,7 @@ const strategy = {
     // available continuously (doesn't require a trigger to have fired).
     // Falls back to it only when evaluate() itself hasn't produced a real
     // quality score yet (i.e. no breakout candle to score).
-    const liveStrength = RefinedStrategy.strength(direction, { 60: candles[60], 300: candles[300] });
+    const liveStrength = RefinedStrategy.strength(direction, { 60: candles[60] });
     const strengthScore = (r.quality && typeof r.quality.total === 'number')
       ? r.quality.total
       : (liveStrength ? liveStrength.score : 0);
@@ -6220,7 +6234,7 @@ const strategy = {
   // strategy's signal identically. See PullbackStrategy for the logic. ──
   _eval2(direction, price) {
     const r = PullbackStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60], 300: candles[300] }
+      price, { 60: candles[60] }
     );
     return {
       signal: !!r.signal,
@@ -6244,7 +6258,7 @@ const strategy = {
   // the logic. ──
   _eval3(direction, price) {
     const r = RangeBounceStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60], 300: candles[300] }
+      price, { 60: candles[60] }
     );
     return {
       signal: !!r.signal,
@@ -6384,11 +6398,12 @@ function drawChart(overridePositions = null, overrideMid = null) {
     ctx.fillText(p.toFixed(2), PAD.l + cW + 3, y + 3);
   }
 
-  // ── M15 EQ LINE — the ONLY M15 visual element allowed on chart ──
-  // M15 provides equilibrium reference only. No OBs, FVGs, or structure from M15.
-  const m15eq = candles[900];
-  if (m15eq && m15eq.length >= 20) {
-    const sl = m15eq.slice(-50);
+  // ── M1 EQUILIBRIUM LINE — a local equilibrium reference, computed off
+  // the same M1 candles the strategy trades. No separate higher timeframe
+  // feeds this (or anything else on the chart) anymore.
+  const eqSrc = candles[60];
+  if (eqSrc && eqSrc.length >= 20) {
+    const sl = eqSrc.slice(-50);
     const eqH = Math.max(...sl.map(c=>c.high)), eqL = Math.min(...sl.map(c=>c.low));
     const eq  = (eqH + eqL) / 2;
     if (eq > minP && eq < maxP) {
@@ -6397,14 +6412,14 @@ function drawChart(overridePositions = null, overrideMid = null) {
       ctx.beginPath(); ctx.moveTo(PAD.l, toY(eq)); ctx.lineTo(PAD.l+cW, toY(eq)); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle='rgba(227,173,76,.70)'; ctx.font='8px "Space Mono"'; ctx.textAlign='left';
-      ctx.fillText('M15 EQ', PAD.l+cW+3, toY(eq)-2);
+      ctx.fillText('M1 EQ', PAD.l+cW+3, toY(eq)-2);
       ctx.restore();
     }
-    // Note: No premium/discount tinting from M15. M5 structural zones handle P/D context.
+    // No separate premium/discount tinting — M1 structural zones handle P/D context.
   }
 
-  // drawHTFZone function retained (structure), but M15 zone calls are removed.
-  // M15 no longer renders OBs or FVGs — EQ line only.
+  // drawHTFZone function retained (structure), but zones now come from the
+  // same M1 chain as everything else — no separate-timeframe zone calls.
   function drawHTFZone(zone, col, label) {
     if (!zone) return;
     const y1 = toY(zone.high), y2 = toY(zone.low);
@@ -6435,11 +6450,11 @@ function drawChart(overridePositions = null, overrideMid = null) {
     ctx.fillText(label, labelX + 4, labelY);
     ctx.restore();
   }
-  // ── M5 OB/FVG zones: intentionally not drawn. The refined engine uses M5
-  // solely for liquidity-sweep detection — it has no M5-timeframe OB/FVG
-  // concept, so there is nothing real here to draw. (Previously this block
-  // called stub methods that always returned null — dead visual code with
-  // no backing logic. Removed rather than left as a decorative no-op.)
+  // ── Only one candle series feeds zone drawing now: M1. There is no
+  // separate-timeframe OB/FVG concept anymore, so there is nothing else to
+  // draw here. (Previously this block called stub methods that always
+  // returned null — dead visual code with no backing logic. Removed rather
+  // than left as a decorative no-op.)
 
   // OB / FVG ZONES — dotted outline; the precise preferred-entry band within
   // this zone is drawn separately by drawMeanThresholdBand() using the real
@@ -6713,7 +6728,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
 
     // ── BULLISH STRUCTURE ──
     if (bullBMS && bullBMS.valid) {
-      // LQ — the specific M5 sweep candle, plus the swept swing-low level it grabbed
+      // LQ — the specific M1 sweep candle, plus the swept swing-low level it grabbed
       markStructureCandle(bullBMS.sweep.candle, '#4ecdae', 'LQ');
       structLine(bullBMS.sweepLow, 'rgba(78,205,174,0.70)', 'LQ', 'right');
       // BMS — the specific M1 break candle, plus the actual swing level it broke
@@ -6724,7 +6739,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
 
     // ── BEARISH STRUCTURE ──
     if (bearBMS && bearBMS.valid) {
-      // LQ — the specific M5 sweep candle, plus the swept swing-high level it grabbed
+      // LQ — the specific M1 sweep candle, plus the swept swing-high level it grabbed
       markStructureCandle(bearBMS.sweep.candle, '#f2606c', 'LQ');
       structLine(bearBMS.sweepHigh, 'rgba(242,96,108,0.70)', 'LQ', 'right');
       // BMS — the specific M1 break candle, plus the actual swing level it broke
@@ -9140,13 +9155,13 @@ function revealApp() {
 
 
 // ── CONTINUATION ENGINE ──
-// New strategy requires a fresh full chain: M5 sweep → M1 displacement → BMS → OB → FVG → zone.
+// Strategy requires a fresh full chain: M1 sweep → M1 displacement → BMS → OB → FVG → zone.
 // No score thresholds — the chain either fires completely or it waits.
 function evalContinuation(dir) {
   const isBull = dir === 'UP';
   const result = isBull ? strategy.evalBuy(mid) : strategy.evalSell(mid);
   return { approved: result.signal, score: result.score, maxScore: 6,
-           m5Bias: 'new-strategy', m15Bias: 'new-strategy' };
+           m1Bias: 'new-strategy' };
 }
 
 
@@ -9229,7 +9244,7 @@ function runStrategy() {
   if (latestClosedEpoch !== null && latestClosedEpoch === lastStrategyEvalEpoch && lastStrategyCandidates) {
     cands = lastStrategyCandidates;
   } else {
-    // Strategy chain: M5 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
+    // Strategy chain: M1 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
     cands = {
       bs: strategy.evalBuy(mid),
       ss: strategy.evalSell(mid),
