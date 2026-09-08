@@ -6082,10 +6082,10 @@ if (typeof RefinedStrategy !== "undefined") {
 //    → G5 ZONE(retracement) → G6 QUALITY-APPROVED(final signal)
 // ══════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════
-//  SIMPLE STRATEGY — one rule, no scoring engine.
+//  SIMPLE STRATEGY — two checks, no scoring engine.
 //
 //  Replaces the old three-strategy / 0-100 quality-score system per explicit
-//  request to make entries/exits/quality-scoring "very simple." The old
+//  request to make entries "very simple" and let trades fire easily. The old
 //  engines (RefinedStrategy, PullbackStrategy, RangeBounceStrategy) are left
 //  further down in this file, untouched, but nothing calls them for trade
 //  decisions anymore — strategy.evalBuy/evalSell route here instead, and
@@ -6094,23 +6094,22 @@ if (typeof RefinedStrategy !== "undefined") {
 //  functions (liquidity/structure/orderBlock/fvg) are still used for the
 //  zone drawing on the chart, independent of trade decisions.
 //
-//  THE RULE (one, not graded — either every check passes, or it doesn't):
-//   1. TREND — EMA20 vs EMA50 on M1 closes. BULL when EMA20 > EMA50, BEAR
-//      when EMA20 < EMA50. Only trend-aligned trades are ever taken.
+//  THE RULE (two checks — cut from three; no body-ratio filter anymore):
+//   1. TREND — last closed M1 close vs a single EMA21. Above = BULL, below
+//      = BEAR. Only trend-aligned trades are ever taken.
 //   2. BREAKOUT — the last CLOSED M1 candle closes beyond the high/low of
-//      the prior 15 bars, in the trend direction.
-//   3. BODY — that breakout candle's body must be at least 50% of its own
-//      range, so a doji/wick-only "breakout" doesn't count.
-//  No liquidity sweep, no order block, no FVG, no news/room/wick filters,
-//  no 0-100 score, no grade tiers. Every trade that fires gets the exact
-//  same fixed grade, so exits (SL/TP/trail/sizing) run at one flat baseline
-//  instead of being tuned per setup quality.
+//      the prior 10 bars (was 15), in the trend direction.
+//  That's the whole rule. No body-strength filter, no liquidity sweep, no
+//  order block, no FVG, no news/room/wick filters, no 0-100 score, no grade
+//  tiers, no second EMA to wait for. Fewer conditions means more setups
+//  qualify and trades fire more often — the honest trade-off is that each
+//  one is checked less, not "quality-verified" in any deeper sense than
+//  "in-trend and broke a short-term range." Every trade that fires gets the
+//  same fixed grade, so SL/TP/trail/sizing all run at one flat baseline.
 // ══════════════════════════════════════════════════════════════════════════
 const SimpleStrategy = (() => {
-  const LOOKBACK = 15;          // bars checked for the breakout range
-  const EMA_FAST = 20;
-  const EMA_SLOW = 50;
-  const MIN_BODY_RATIO = 0.5;
+  const LOOKBACK = 10;          // bars checked for the breakout range (was 15)
+  const TREND_EMA = 21;         // single EMA — no second EMA to wait for
 
   function ema(values, period) {
     if (!values.length) return [];
@@ -6122,33 +6121,27 @@ const SimpleStrategy = (() => {
 
   function evaluate(direction, candleSets) {
     const m1 = (candleSets && candleSets[60]) || [];
-    const need = EMA_SLOW + LOOKBACK + 2;
+    const need = TREND_EMA + LOOKBACK + 2;
     if (m1.length < need) return { signal: false, reason: 'NOT_ENOUGH_DATA' };
 
     const closed = m1.slice(0, -1);                   // exclude the still-forming bar
     const trigger = closed[closed.length - 1];         // last fully closed M1 candle
-    const range15 = closed.slice(-1 - LOOKBACK, -1);   // the 15 bars BEFORE the trigger
-    if (range15.length < LOOKBACK) return { signal: false, reason: 'NOT_ENOUGH_DATA' };
+    const range10 = closed.slice(-1 - LOOKBACK, -1);   // the 10 bars BEFORE the trigger
+    if (range10.length < LOOKBACK) return { signal: false, reason: 'NOT_ENOUGH_DATA' };
 
     const closes = closed.map(c => c.close);
-    const emaFast = ema(closes, EMA_FAST);
-    const emaSlow = ema(closes, EMA_SLOW);
-    const trend = emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] ? 'BULL' : 'BEAR';
+    const emaSeries = ema(closes, TREND_EMA);
+    const trend = trigger.close > emaSeries[emaSeries.length - 1] ? 'BULL' : 'BEAR';
 
     const isBuy = direction === 'BUY';
     if ((isBuy && trend !== 'BULL') || (!isBuy && trend !== 'BEAR')) {
       return { signal: false, reason: 'AGAINST_TREND', trend };
     }
 
-    const rangeHigh = Math.max(...range15.map(c => c.high));
-    const rangeLow  = Math.min(...range15.map(c => c.low));
+    const rangeHigh = Math.max(...range10.map(c => c.high));
+    const rangeLow  = Math.min(...range10.map(c => c.low));
     const brokeOut = isBuy ? trigger.close > rangeHigh : trigger.close < rangeLow;
     if (!brokeOut) return { signal: false, reason: 'NO_BREAKOUT', trend };
-
-    const body = Math.abs(trigger.close - trigger.open);
-    const span = trigger.high - trigger.low;
-    const bodyRatio = span > 0 ? body / span : 0;
-    if (bodyRatio < MIN_BODY_RATIO) return { signal: false, reason: 'WEAK_BODY', trend };
 
     return {
       signal: true,
@@ -12225,7 +12218,7 @@ setInterval(() => {
 
 addSignal('info','BTCUSD PA Bot v2 — Coinbase API data engine ready',null);
 
-addSignal('info','Strategy — Simple Trend Breakout: EMA20 vs EMA50 sets trend → last closed M1 candle must close beyond the prior 15-bar high/low in that direction, with a real body (≥50% of its range) → fires. One rule, no scoring, one fixed grade | SL = 15-bar range edge ± ATR buffer',null);
+addSignal('info','Strategy — Simple Trend Breakout: last M1 close vs EMA21 sets trend → last closed M1 candle must close beyond the prior 10-bar high/low in that direction → fires. Two checks, no scoring, one fixed grade | SL = 10-bar range edge ± ATR buffer',null);
 </script>
 </body>
 </html>
