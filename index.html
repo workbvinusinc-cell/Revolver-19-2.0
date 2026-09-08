@@ -1719,13 +1719,14 @@ const CFG = {
   MAX_PORTFOLIO_HEAT_R: 2.0,
   // ── Three-Phase Trailing Stop ──
   TRAIL_ENABLED: true,
-  // BE lock eased back from 60% → 52% of the way to TP. 60% was raised
-  // specifically to dodge premature BE on volatility, but it also meant a
-  // lot of trades that got most of the way to TP and then reversed still
-  // paid out a full SL loss instead of scratching at breakeven — directly
-  // inflating both the SL-hit count and drawdown the bot is trying to cut.
-  // 52% still requires a real, non-noise move in favor before locking BE.
-  TRAIL_PHASE_1: 58,          // % to TP for BE lock (was 52 — requires a stronger, less noise-prone move before locking BE)
+  // BE lock: this value has previously swung between 52 (too many premature
+  // BE locks on noise) and 58 (too many trades that got most of the way to
+  // TP and then reversed, paying a full SL loss instead of scratching at
+  // breakeven). Splitting the difference at 54 — closer to the loss-cutting
+  // side, since the goal right now is smaller average losers, but still far
+  // enough from 52 to avoid re-introducing the noise problem that motivated
+  // the earlier move to 58.
+  TRAIL_PHASE_1: 54,          // % to TP for BE lock
   TRAIL_PHASE_2: 78,          // % to TP for 40% trail (was 74)
   TRAIL_PHASE_3: 92,          // % to TP for 60% runner trail (was 90)
   TRAIL_DIST   : 3.0,         // Min trail distance in $ (was 2.0) — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
@@ -2766,7 +2767,7 @@ const REFINED_STRATEGY_CFG = {
     // Widened from 0.20 — still small next to the wider lookbackBars-based
     // stop above, but gives a plain wick-retest of the level a bit more
     // room before it counts as invalidation.
-    slBufferATR: 0.25,  // was 0.35 — tightened alongside the new overshoot/failed-break checks below
+    slBufferATR: 0.20,  // was 0.25 — tightened further to shrink loss size on structural stop-outs; trade-off is more stop-outs from ordinary noise/wicks, since there's less room around the structure level
 
     // BUG FIX — the root cause of the bot's low win rate: this was a flat
     // $6 cap on SL distance. That number makes sense for a much
@@ -5090,7 +5091,7 @@ const EMA_PULLBACK_CFG = {
   minBodyRatio: 0.30,
 
   swingLookback: 10,      // bars back to find the structural SL reference
-  slBufferATR: 0.30,
+  slBufferATR: 0.24,      // was 0.30 — tightened to shrink loss size on structural stop-outs; same stop-out-frequency trade-off as Strategy 1
 
   roomLookbackBars: 20,   // window checked for a nearby opposing wall
   minRoomATR: 0.35,       // eased from 0.4 — room here is scored, not a hard
@@ -8648,12 +8649,19 @@ function checkRiskOverflow(slDist, quality, useBalance, opts) {
   const tradeableCapital = floor > 0 ? Math.max(0, (bal - floor) * 0.80) : bal;
   const targetRisk = Math.min(bal * riskPct / 100, tradeableCapital * riskPct / 100);
 
-  // Signal-quality, balance-growth, market-regime, and session size
-  // multipliers have been removed — every trade sizes off the same base
-  // risk (qMult/growthFactor/regimeMult/sessionMult are kept at 1.0 as
-  // neutral placeholders so the rest of this pipeline, e.g. the
-  // portfolio-heat guard below, doesn't need to change shape).
-  let qMult = 1.0;
+  // Balance-growth, market-regime, and session size multipliers remain
+  // removed (growthFactor/regimeMult/sessionMult stay at 1.0 as neutral
+  // placeholders). Quality-based sizing is reintroduced here in a small,
+  // bounded form: every trade that reaches this point already cleared the
+  // A-grade quality gate (only A/A+ ever fire — see each strategy's
+  // evaluate()), so this only scales between the low end of A (~88) and A+
+  // (100), 0.85x-1.0x. It doesn't change which trades get taken, just makes
+  // the weaker-of-the-two-approved-grades risk a bit less, so a loss on one
+  // of those costs a bit less too.
+  const qScore = Number.isFinite(opts.qualityScore) ? opts.qualityScore : null;
+  let qMult = qScore !== null
+    ? Math.max(0.85, Math.min(1.0, 0.85 + (Math.max(0, Math.min(100, qScore)) - 88) / 12 * 0.15))
+    : 1.0;
   const growthFactor = 1.0;
 
   // ── Portfolio-heat guard ──
