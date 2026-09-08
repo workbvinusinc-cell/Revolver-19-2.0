@@ -6081,6 +6081,91 @@ if (typeof RefinedStrategy !== "undefined") {
 //    G1 SWEEP → G2 BMS(structure) → G3 OB → G4 FVG(bonus,not mandatory)
 //    → G5 ZONE(retracement) → G6 QUALITY-APPROVED(final signal)
 // ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+//  SIMPLE STRATEGY — one rule, no scoring engine.
+//
+//  Replaces the old three-strategy / 0-100 quality-score system per explicit
+//  request to make entries/exits/quality-scoring "very simple." The old
+//  engines (RefinedStrategy, PullbackStrategy, RangeBounceStrategy) are left
+//  further down in this file, untouched, but nothing calls them for trade
+//  decisions anymore — strategy.evalBuy/evalSell route here instead, and
+//  evalBuy2/evalSell2/evalBuy3/evalSell3 are disabled stubs. They're kept
+//  as dead code rather than deleted, since RefinedStrategy's low-level chart
+//  functions (liquidity/structure/orderBlock/fvg) are still used for the
+//  zone drawing on the chart, independent of trade decisions.
+//
+//  THE RULE (one, not graded — either every check passes, or it doesn't):
+//   1. TREND — EMA20 vs EMA50 on M1 closes. BULL when EMA20 > EMA50, BEAR
+//      when EMA20 < EMA50. Only trend-aligned trades are ever taken.
+//   2. BREAKOUT — the last CLOSED M1 candle closes beyond the high/low of
+//      the prior 15 bars, in the trend direction.
+//   3. BODY — that breakout candle's body must be at least 50% of its own
+//      range, so a doji/wick-only "breakout" doesn't count.
+//  No liquidity sweep, no order block, no FVG, no news/room/wick filters,
+//  no 0-100 score, no grade tiers. Every trade that fires gets the exact
+//  same fixed grade, so exits (SL/TP/trail/sizing) run at one flat baseline
+//  instead of being tuned per setup quality.
+// ══════════════════════════════════════════════════════════════════════════
+const SimpleStrategy = (() => {
+  const LOOKBACK = 15;          // bars checked for the breakout range
+  const EMA_FAST = 20;
+  const EMA_SLOW = 50;
+  const MIN_BODY_RATIO = 0.5;
+
+  function ema(values, period) {
+    if (!values.length) return [];
+    const k = 2 / (period + 1);
+    const out = [values[0]];
+    for (let i = 1; i < values.length; i++) out.push(values[i] * k + out[i - 1] * (1 - k));
+    return out;
+  }
+
+  function evaluate(direction, candleSets) {
+    const m1 = (candleSets && candleSets[60]) || [];
+    const need = EMA_SLOW + LOOKBACK + 2;
+    if (m1.length < need) return { signal: false, reason: 'NOT_ENOUGH_DATA' };
+
+    const closed = m1.slice(0, -1);                   // exclude the still-forming bar
+    const trigger = closed[closed.length - 1];         // last fully closed M1 candle
+    const range15 = closed.slice(-1 - LOOKBACK, -1);   // the 15 bars BEFORE the trigger
+    if (range15.length < LOOKBACK) return { signal: false, reason: 'NOT_ENOUGH_DATA' };
+
+    const closes = closed.map(c => c.close);
+    const emaFast = ema(closes, EMA_FAST);
+    const emaSlow = ema(closes, EMA_SLOW);
+    const trend = emaFast[emaFast.length - 1] > emaSlow[emaSlow.length - 1] ? 'BULL' : 'BEAR';
+
+    const isBuy = direction === 'BUY';
+    if ((isBuy && trend !== 'BULL') || (!isBuy && trend !== 'BEAR')) {
+      return { signal: false, reason: 'AGAINST_TREND', trend };
+    }
+
+    const rangeHigh = Math.max(...range15.map(c => c.high));
+    const rangeLow  = Math.min(...range15.map(c => c.low));
+    const brokeOut = isBuy ? trigger.close > rangeHigh : trigger.close < rangeLow;
+    if (!brokeOut) return { signal: false, reason: 'NO_BREAKOUT', trend };
+
+    const body = Math.abs(trigger.close - trigger.open);
+    const span = trigger.high - trigger.low;
+    const bodyRatio = span > 0 ? body / span : 0;
+    if (bodyRatio < MIN_BODY_RATIO) return { signal: false, reason: 'WEAK_BODY', trend };
+
+    return {
+      signal: true,
+      reason: 'BREAKOUT',
+      trend,
+      direction,
+      triggerEpoch: trigger.epoch,
+      ob: { low: rangeLow, high: rangeHigh },   // fed straight into the existing ATR-buffered SL fallback
+    };
+  }
+
+  return {
+    evaluateBuy(candleSets)  { return evaluate('BUY', candleSets); },
+    evaluateSell(candleSets) { return evaluate('SELL', candleSets); },
+  };
+})();
+
 const strategy = {
   _btEpoch: null, // set by the replay engine during backtest; null = live (uses Date.now())
 
@@ -6156,125 +6241,51 @@ const strategy = {
   bullishOBCandle2() { const r = this.bullishBMS(); return r.valid ? r.obCandle : null; },
   bearishOBCandle2() { const r = this.bearishBMS(); return r.valid ? r.obCandle : null; },
 
-  // ── MAIN SIGNAL EVALUATION ──
-  // Returns a shape compatible with every existing runStrategy()/UI call
-  // site: .signal, .score (0-6 gate count), .quality (rich object —
-  // convert with refinedScoreToLegacyGrade() at the execution boundary),
-  // .conds{}, .ob, .fvg, .zone, .slRef, .sweepEpoch/.sweepLow/.sweepHigh.
+  // ── MAIN SIGNAL EVALUATION — now a thin wrapper around SimpleStrategy.
+  // Same output shape runStrategy()/backtest/UI expect, but every field
+  // that used to carry a 0-100 score or a multi-gate chain is now fixed:
+  // one grade, one RR, one size multiplier, for every trade that fires. ──
   _eval(direction, price) {
-    const r = RefinedStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60] }
-    );
-    const gDefault = { trigger:false, regimeOk:false, newsOk:false, roomOk:false, wickOk:false, quality:false };
-    const g = Object.assign({}, gDefault, r.gates || {});
-    const score = Object.values(g).filter(Boolean).length;
+    const r = SimpleStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')]({ 60: candles[60] });
     const isBuy = direction === 'BUY';
 
-    // Live strength (0-100) — same weighted formula evaluate() uses, but
-    // available continuously (doesn't require a trigger to have fired).
-    // Falls back to it only when evaluate() itself hasn't produced a real
-    // quality score yet (i.e. no breakout candle to score).
-    const liveStrength = RefinedStrategy.strength(direction, { 60: candles[60] });
-    const strengthScore = (r.quality && typeof r.quality.total === 'number')
-      ? r.quality.total
-      : (liveStrength ? liveStrength.score : 0);
-
     const conds = isBuy ? {
-      bSess:  r.trend === 'BULL',
-      bKZ:    this.inKillZone(),
-      bSweep: g.trigger,
-      bBMS:   g.regimeOk,
-      bOB:    g.newsOk,
-      bFVG:   g.roomOk,
-      bZone:  g.wickOk,
-      bEntry: !!r.signal,
+      bSess: r.trend === 'BULL', bKZ: this.inKillZone(), bEntry: !!r.signal,
     } : {
-      sSess:  r.trend === 'BEAR',
-      sKZ:    this.inKillZone(),
-      sSweep: g.trigger,
-      sBMS:   g.regimeOk,
-      sOB:    g.newsOk,
-      sFVG:   g.roomOk,
-      sZone:  g.wickOk,
-      sEntry: !!r.signal,
+      sSess: r.trend === 'BEAR', sKZ: this.inKillZone(), sEntry: !!r.signal,
     };
 
     return {
       signal: !!r.signal,
       reason: r.reason,
-      score,
-      quality: r.quality,                                   // rich {total,grade,approved,components} or null
-      legacyGrade: r.quality ? refinedScoreToLegacyGrade(r.quality.total) : 1, // 1/2/3 star, for the existing risk engine
-      sweepEpoch: r.sweep ? r.sweep.epoch : undefined,
-      sweepIdx: r.sweep ? r.sweep.index : undefined,
-      sweepLow:   (isBuy  && r.sweep) ? r.sweep.level : undefined,
-      sweepHigh:  (!isBuy && r.sweep) ? r.sweep.level : undefined,
-      ob:  r.ob  ? { low: r.ob.low,   high: r.ob.high }  : null,
-      fvg: r.fvg ? { low: r.fvg.low,  high: r.fvg.high } : null,
-      zone: r.zone || null,
-      // HYBRID SL reference — the sweep candle's extreme, matching the
-      // original bot's "SL at sweep candle low/high" spec.
-      slRef: r.sweep ? { low: r.sweep.candle.low, high: r.sweep.candle.high } : null,
+      score: r.signal ? 6 : 0,          // kept only so old dedup-threshold comparisons still hold
+      quality: r.signal ? { total: 75, grade: 'A', approved: true } : null,
+      legacyGrade: 2,                    // one fixed grade — no tiers, so SL/TP/trail/sizing all run at baseline
+      sweepEpoch: r.triggerEpoch,
+      sweepLow:  (isBuy  && r.ob) ? r.ob.low  : undefined,
+      sweepHigh: (!isBuy && r.ob) ? r.ob.high : undefined,
+      ob: r.ob || null,
+      fvg: null,
+      zone: null,
+      slRef: null,        // no separate structural reference — SL comes from `ob` via the existing ATR-buffered fallback
       conds,
-      // NEW — raw 0-100 quality score (undithered by the 1/2/3 legacy bucket)
-      // and the raw setup object, so the execution boundary can call
-      // RefinedStrategy.calculateTradeGeometry()/calculatePositionSize()
-      // instead of re-deriving SL/TP/size from scratch.
-      qualityScore: r.quality ? r.quality.total : null,
-      // Continuous 0-100 strength for the gauge — see liveStrength above.
-      strength: strengthScore,
-      counterTrend: r.counterTrend || (liveStrength ? liveStrength.counterTrend : false),
-      raw: r,
+      qualityScore: null, // no continuous score — RR/sizing use their flat baseline everywhere
+      strength: r.signal ? 100 : (r.trend ? 50 : 0),
+      counterTrend: false,
+      raw: null,           // deliberately null so the old geometry engine is never invoked (see placeDemoTrade)
     };
   },
   evalBuy(price)  { return this._eval('BUY', price); },
   evalSell(price) { return this._eval('SELL', price); },
 
-  // ── STRATEGY 2 (EMA Pullback Continuation) — same output shape as
-  // _eval() above so runStrategy() / placeDemoTrade can treat either
-  // strategy's signal identically. See PullbackStrategy for the logic. ──
-  _eval2(direction, price) {
-    const r = PullbackStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60] }
-    );
-    return {
-      signal: !!r.signal,
-      reason: r.reason,
-      quality: r.quality,
-      legacyGrade: r.quality ? pullbackScoreToLegacyGrade(r.quality.total) : 1,
-      qualityScore: r.quality ? r.quality.total : null,
-      epoch: r.epoch,
-      ob: r.ob || null,
-      slRef: r.ob || null,
-      trend: r.trend,
-      raw: r,
-    };
-  },
-  evalBuy2(price)  { return this._eval2('BUY', price); },
-  evalSell2(price) { return this._eval2('SELL', price); },
-
-  // ── STRATEGY 3 (Range-Edge Rejection) — same output shape as _eval()/
-  // _eval2() so runStrategy() / backtest _evaluateEntry() can treat any of
-  // the three strategies' signals identically. See RangeBounceStrategy for
-  // the logic. ──
-  _eval3(direction, price) {
-    const r = RangeBounceStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
-      price, { 60: candles[60] }
-    );
-    return {
-      signal: !!r.signal,
-      reason: r.reason,
-      quality: r.quality,
-      legacyGrade: r.quality ? rangeBounceScoreToLegacyGrade(r.quality.total) : 1,
-      qualityScore: r.quality ? r.quality.total : null,
-      epoch: r.epoch,
-      ob: r.ob || null,
-      slRef: r.ob || null,
-      raw: r,
-    };
-  },
-  evalBuy3(price)  { return this._eval3('BUY', price); },
-  evalSell3(price) { return this._eval3('SELL', price); },
+  // Strategy 2 (EMA Pullback) and Strategy 3 (Range-Edge Rejection) are
+  // retired — SimpleStrategy above is the only strategy now. These stubs
+  // keep the existing six-slot dispatch in runStrategy()/backtest working
+  // unchanged; they simply never produce a signal.
+  evalBuy2()  { return { signal: false }; },
+  evalSell2() { return { signal: false }; },
+  evalBuy3()  { return { signal: false }; },
+  evalSell3() { return { signal: false }; },
 };
 
 // ── UNIFIED GATE CHAIN — ONE place that knows how many gates each of the
@@ -9353,12 +9364,12 @@ function runStrategy() {
   switch (winner.key) {
     case 'S1_BUY':
       lastTradedBullSweepIdx = bs.sweepIdx; lastTradedBullSweepEpoch = now; lastTradedBullSweepPrice = bs.sweepLow || 0;
-      addSignal('buy', `[${sess}]${kzTag} BUY ${gradeStars(bs.legacyGrade)}${nTag} — Momentum Breakout · Quality ${bs.qualityScore != null ? Math.round(bs.qualityScore) : '—'} (${bs.raw && bs.raw.quality ? bs.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
+      addSignal('buy', `[${sess}]${kzTag} BUY${nTag} — Trend Breakout (EMA20>50 + 15-bar range break) ✓ SL@range`, mid);
       placeDemoTrade('UP', bs.slRef || bs.ob, bs.legacyGrade, bs.raw, bs.qualityScore);
       break;
     case 'S1_SELL':
       lastTradedBearSweepIdx = ss.sweepIdx; lastTradedBearSweepEpoch = now; lastTradedBearSweepPrice = ss.sweepHigh || 0;
-      addSignal('sell', `[${sess}]${kzTag} SELL ${gradeStars(ss.legacyGrade)}${nTag} — Momentum Breakout · Quality ${ss.qualityScore != null ? Math.round(ss.qualityScore) : '—'} (${ss.raw && ss.raw.quality ? ss.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
+      addSignal('sell', `[${sess}]${kzTag} SELL${nTag} — Trend Breakout (EMA20<50 + 15-bar range break) ✓ SL@range`, mid);
       placeDemoTrade('DOWN', ss.slRef || ss.ob, ss.legacyGrade, ss.raw, ss.qualityScore);
       break;
     case 'S2_BUY':
@@ -12214,10 +12225,7 @@ setInterval(() => {
 
 addSignal('info','BTCUSD PA Bot v2 — Coinbase API data engine ready',null);
 
-addSignal('info','Strategy 1: Momentum Breakout + Quality Score Engine — M1 candle breaks N-bar range with strong body → hard trend/overshoot/failed-break filters → regime/news/room/wick checks → 0-100 quality score graded B+/A/A+ | SL=structural HYBRID reference',null);
-addSignal('info','Strategy 2: EMA Pullback Continuation — M1 EMA9/21 trend → two-sided EMA touch + pullback-and-reclaim trigger → regime/news/room checks → 0-100 quality score | SL=structural swing reference',null);
-addSignal('info','Strategy 3: Range-Edge Rejection — RANGE-regime-only → bounded edge-sweep + wick rejection → 0-100 quality score | SL=structural range reference',null);
-addSignal('info','Strategy selection: all 3 strategies × both directions are evaluated every bar; the strongest valid setup by quality score fires — no strategy is prioritized just for being evaluated first.',null);
+addSignal('info','Strategy — Simple Trend Breakout: EMA20 vs EMA50 sets trend → last closed M1 candle must close beyond the prior 15-bar high/low in that direction, with a real body (≥50% of its range) → fires. One rule, no scoring, one fixed grade | SL = 15-bar range edge ± ATR buffer',null);
 </script>
 </body>
 </html>
